@@ -440,19 +440,32 @@ class Store {
         (a.componentId || '') === (entry.componentId || '')
       );
 
-      if (matchedAsg && matchedAsg.teacherId && matchedAsg.teacherId !== entry.teacherId) {
-        updatedCount++;
-        return {
-          ...entry,
-          teacherId: matchedAsg.teacherId
-        };
+      // If assignment exists and has a valid teacher assigned
+      if (matchedAsg && matchedAsg.teacherId) {
+        if (matchedAsg.teacherId !== entry.teacherId) {
+          updatedCount++;
+          return {
+            ...entry,
+            teacherId: matchedAsg.teacherId
+          };
+        }
+      } else {
+        // If assignment does not exist or teacher is unassigned, clear the teacher from this timetable entry
+        if (entry.teacherId && entry.teacherId !== '') {
+          updatedCount++;
+          return {
+            ...entry,
+            teacherId: ''
+          };
+        }
       }
       return entry;
     });
 
     if (updatedCount > 0) {
       this.updateTimetableEntries(weekId, ver.id, updatedEntries);
-      this.addAuditLog('Đồng bộ Phân công & TKB', `Đã đồng bộ giáo viên cho ${updatedCount} tiết trong thời khóa biểu tuần ${weekId}`);
+      this.addAuditLog('Đồng bộ Phân công & TKB', `Đã đồng bộ và làm sạch giáo viên cho ${updatedCount} tiết trong thời khóa biểu tuần ${weekId}`);
+      this.save();
     }
 
     return updatedCount;
