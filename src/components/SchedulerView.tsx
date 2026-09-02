@@ -242,9 +242,9 @@ export const SchedulerView: React.FC<SchedulerViewProps> = ({ onNavigate }) => {
                 className="mt-0.5 rounded border-slate-700 text-indigo-600 focus:ring-indigo-500 bg-slate-950"
               />
               <div>
-                <span className="font-bold text-white block">Tối ưu So le giữa các Khối lớp</span>
+                <span className="font-bold text-white block">Tối ưu So le giữa các Khối & Rải đều ngày</span>
                 <span className="text-[11px] text-slate-400 leading-snug block mt-0.5">
-                  Đảm bảo GV Tiếng Anh / Thể Dục không bị trùng lịch giữa các Khối 6, 7, 8, 9 và phân bổ đều các buổi.
+                  Đảm bảo GV không bị trùng lịch giữa các Khối (6, 7, 8, 9) và phân bổ đều môn sang các ngày trong tuần.
                 </span>
               </div>
             </label>
@@ -252,14 +252,14 @@ export const SchedulerView: React.FC<SchedulerViewProps> = ({ onNavigate }) => {
             <label className="flex items-start space-x-2.5 cursor-pointer bg-slate-900/80 p-3 rounded-xl border border-slate-800/80 hover:border-indigo-500/40 transition">
               <input
                 type="checkbox"
-                checked={allowSameGradeParallel}
-                onChange={(e) => setAllowSameGradeParallel(e.target.checked)}
+                checked={true}
+                disabled={true}
                 className="mt-0.5 rounded border-slate-700 text-indigo-600 focus:ring-indigo-500 bg-slate-950"
               />
               <div>
-                <span className="font-bold text-white block">Cho phép Gộp / Trùng tiết cùng Khối</span>
+                <span className="font-bold text-emerald-400 block">✓ Khóa Cứng: Chống Trùng Tiết Giáo Viên 100%</span>
                 <span className="text-[11px] text-slate-400 leading-snug block mt-0.5">
-                  Cho phép dồn tiết liên tiếp hoặc trùng tiết cho các lớp cùng một Khối để giải phóng khung giờ dồn sang khối khác.
+                  Tuyệt đối không để xảy ra hiện tượng 1 giáo viên bị xếp trùng tiết cùng lúc ở 2 lớp khác nhau (cả cùng khối lẫn khác khối).
                 </span>
               </div>
             </label>

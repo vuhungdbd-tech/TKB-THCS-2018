@@ -57,19 +57,37 @@ export const ConflictReportView: React.FC<ConflictReportViewProps> = ({ onNaviga
             Phân tích chi tiết các nguyên nhân dẫn đến tiết chưa xếp hoặc vi phạm ràng buộc cho {currentWeek.name}.
           </p>
         </div>
-        <button
-          onClick={() => {
-            const fixedTch = store.autoFixTeacherLimits(currentWeek.id);
-            const res = store.scanAndFixTimetable(currentWeek.id);
-            setSyncMsg(`✓ Đã tự động nâng hạn mức cho ${fixedTch} giáo viên quá tải và lấp đầy TKB! (${res.fixedCount} cập nhật)`);
-            setTimeout(() => setSyncMsg(null), 5000);
-          }}
-          className="flex items-center space-x-2 bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs px-4 py-2.5 rounded-xl transition shadow-lg shadow-indigo-600/30"
-          title="Tự động nâng hạn mức tiết tối đa cho giáo viên và lấp đầy TKB"
-        >
-          <RefreshCw className="w-4 h-4" />
-          <span>⚡ Tự động khắc phục lỗi quá tải & TKB trống</span>
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            onClick={() => {
+              const deconflicted = store.autoResolveTeacherCollisions(currentWeek.id);
+              if (deconflicted > 0) {
+                setSyncMsg(`✓ Đã tự động xử lý và di chuyển ${deconflicted} tiết để gỡ trùng lịch giáo viên!`);
+              } else {
+                setSyncMsg(`✓ Không phát hiện tiết nào bị trùng lịch giáo viên.`);
+              }
+              setTimeout(() => setSyncMsg(null), 5000);
+            }}
+            className="flex items-center space-x-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs px-3.5 py-2 rounded-xl transition shadow-lg shadow-emerald-600/20"
+            title="Tự động kiểm tra và hoán đổi/di chuyển các tiết bị trùng lịch cùng khung giờ của giáo viên"
+          >
+            <Sparkles className="w-4 h-4" />
+            <span>⚡ Gỡ trùng lịch GV</span>
+          </button>
+          <button
+            onClick={() => {
+              const fixedTch = store.autoFixTeacherLimits(currentWeek.id);
+              const res = store.scanAndFixTimetable(currentWeek.id);
+              setSyncMsg(`✓ Đã tự động nâng hạn mức cho ${fixedTch} giáo viên quá tải, xếp lại không trùng tiết và lấp đầy TKB! (${res.fixedCount} cập nhật)`);
+              setTimeout(() => setSyncMsg(null), 5000);
+            }}
+            className="flex items-center space-x-2 bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs px-4 py-2 rounded-xl transition shadow-lg shadow-indigo-600/30"
+            title="Tự động nâng hạn mức tiết tối đa cho giáo viên và lấp đầy TKB"
+          >
+            <RefreshCw className="w-4 h-4" />
+            <span>⚡ Khắc phục TKB & Xếp lại</span>
+          </button>
+        </div>
       </div>
 
       {/* Overview stats */}

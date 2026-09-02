@@ -468,7 +468,141 @@ class Store {
       this.save();
     }
 
+    // Automatically check and deconflict teacher collisions if any
+    this.autoResolveTeacherCollisions(weekId);
+
     return updatedCount;
+  }
+
+  public autoResolveTeacherCollisions(weekId: string): number {
+    const ver = this.getTimetableVersion(weekId);
+    if (!ver || !ver.entries || ver.entries.length === 0) return 0;
+
+    let resolvedCount = 0;
+    const entries = [...ver.entries];
+    const activeDays = this.state.dayConfigs ? this.state.dayConfigs.filter(d => d.isActive).map(d => d.dayOfWeek) : [2, 3, 4, 5, 6];
+    const morningCount = this.state.timeSlotConfig?.morningPeriodsCount || 4;
+    const afternoonCount = this.state.timeSlotConfig?.afternoonPeriodsCount || 4;
+    const allPeriods = Array.from({ length: morningCount + afternoonCount }, (_, i) => i + 1);
+
+    // Iteratively find teacher collisions and resolve them
+    let hasCollision = true;
+    let loopGuard = 0;
+
+    while (hasCollision && loopGuard < 50) {
+      loopGuard++;
+      hasCollision = false;
+
+      // Group entries by teacher, day, period
+      const teacherSlots = new Map<string, TimetableEntry[]>();
+      entries.forEach(e => {
+        if (!e.teacherId) return;
+        const key = `${e.teacherId}_${e.dayOfWeek}_${e.period}`;
+        if (!teacherSlots.has(key)) teacherSlots.set(key, []);
+        teacherSlots.get(key)!.push(e);
+      });
+
+      for (const [key, group] of teacherSlots.entries()) {
+        if (group.length > 1) {
+          hasCollision = true;
+          // Keep group[0] in place, try to move or swap subsequent entries (group[1..n])
+          for (let gIdx = 1; gIdx < group.length; gIdx++) {
+            const conflictEntry = group[gIdx];
+            const cls = this.state.classes.find(c => c.id === conflictEntry.classId);
+            const teacherId = conflictEntry.teacherId;
+            let moved = false;
+
+            // 1. Try to find a free slot for this class where this teacher is also completely free
+            for (const d of activeDays) {
+              if (moved) break;
+              for (const p of allPeriods) {
+                // Class slot must be free
+                const classHasEntry = entries.some(e => e.classId === conflictEntry.classId && e.dayOfWeek === d && e.period === p);
+                if (classHasEntry) continue;
+
+                // Teacher must be free
+                const teacherIsBusy = entries.some(e => e.teacherId === teacherId && e.dayOfWeek === d && e.period === p);
+                if (teacherIsBusy) continue;
+
+                // Check non-consecutive rule for same teacher in same class
+                const isAdjacent = entries.some(e => 
+                  e.classId === conflictEntry.classId && 
+                  e.teacherId === teacherId && 
+                  e.dayOfWeek === d && 
+                  Math.abs(e.period - p) === 1
+                );
+                if (isAdjacent) continue;
+
+                // Check shift constraints
+                const isMorning = p <= morningCount;
+                if (cls?.shift === 'morning' && !isMorning) continue;
+                if (cls?.shift === 'afternoon' && isMorning) continue;
+
+                // Move conflictEntry to (d, p)
+                const targetIdx = entries.findIndex(e => e.id === conflictEntry.id);
+                if (targetIdx !== -1) {
+                  entries[targetIdx] = {
+                    ...conflictEntry,
+                    dayOfWeek: d,
+                    period: p,
+                    session: isMorning ? 'morning' : 'afternoon'
+                  };
+                  resolvedCount++;
+                  moved = true;
+                  break;
+                }
+              }
+            }
+
+            // 2. If no empty slot found, try to swap with another entry in the same class whose teacher is free
+            if (!moved) {
+              const classEntries = entries.filter(e => e.classId === conflictEntry.classId && e.id !== conflictEntry.id);
+              for (const candidate of classEntries) {
+                const candD = candidate.dayOfWeek;
+                const candP = candidate.period;
+                const candTeacherId = candidate.teacherId;
+
+                // For swap:
+                // 1) conflictEntry teacher must be free at (candD, candP)
+                const conflictTeacherBusyAtCand = entries.some(e => e.teacherId === teacherId && e.id !== conflictEntry.id && e.id !== candidate.id && e.dayOfWeek === candD && e.period === candP);
+                if (conflictTeacherBusyAtCand) continue;
+
+                // 2) candidate teacher must be free at (conflictEntry.dayOfWeek, conflictEntry.period)
+                const candTeacherBusyAtOrig = candTeacherId ? entries.some(e => e.teacherId === candTeacherId && e.id !== conflictEntry.id && e.id !== candidate.id && e.dayOfWeek === conflictEntry.dayOfWeek && e.period === conflictEntry.period) : false;
+                if (candTeacherBusyAtOrig) continue;
+
+                // 3) Non-consecutive check for both
+                const conflictAdjacent = entries.some(e => e.classId === conflictEntry.classId && e.teacherId === teacherId && e.id !== conflictEntry.id && e.id !== candidate.id && e.dayOfWeek === candD && Math.abs(e.period - candP) === 1);
+                if (conflictAdjacent) continue;
+
+                // Perform Swap
+                const idx1 = entries.findIndex(e => e.id === conflictEntry.id);
+                const idx2 = entries.findIndex(e => e.id === candidate.id);
+                if (idx1 !== -1 && idx2 !== -1) {
+                  const origDay = conflictEntry.dayOfWeek;
+                  const origPeriod = conflictEntry.period;
+                  const origSession = conflictEntry.session;
+
+                  entries[idx1] = { ...conflictEntry, dayOfWeek: candD, period: candP, session: candidate.session };
+                  entries[idx2] = { ...candidate, dayOfWeek: origDay, period: origPeriod, session: origSession };
+                  resolvedCount++;
+                  moved = true;
+                  break;
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+
+    if (resolvedCount > 0) {
+      this.updateTimetableEntries(weekId, ver.id, entries);
+      this.addAuditLog('Khử trùng tiết giáo viên', `Đã tự động gỡ và giải quyết ${resolvedCount} tiết trùng lịch của giáo viên.`);
+      this.save();
+    }
+
+    return resolvedCount;
   }
 
   public syncSubjectsToMasterAssignments(): number {
@@ -614,6 +748,10 @@ class Store {
         ver.weekId = weekId;
         ver.isCurrent = true;
         this.saveTimetableVersion(weekId, ver);
+        const deconflicted = this.autoResolveTeacherCollisions(weekId);
+        if (deconflicted > 0) {
+          messages.push(`Đã tự động xử lý ${deconflicted} tiết để đảm bảo không trùng lịch giáo viên.`);
+        }
         messages.push(`Đã chạy lại thuật toán xếp lịch (Solver) thành công! Đã lấp đầy toàn bộ các tiết trống, khớp 100% theo phân công mới nhất.`);
         fixedCount += ver.entries.length;
       } else {

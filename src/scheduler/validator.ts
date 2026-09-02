@@ -74,30 +74,20 @@ export function validateTimetable(
       const periodStr = sample.period;
       const tch = state.teachers.find(t => t.id === teacherId);
 
-      const areSameGrade = list.every(e => {
-        const cls = state.classes.find(c => c.id === e.classId);
-        const firstCls = state.classes.find(c => c.id === list[0].classId);
-        return cls?.gradeId && firstCls?.gradeId && cls.gradeId === firstCls.gradeId;
-      });
-
-      if (tch?.allowDoubleBooking && areSameGrade && list.length <= 2) {
-        // Valid double booking for allowed teacher within same grade
-        return;
-      }
-
       const classNames = list.map(e => state.classes.find(c => c.id === e.classId)?.name || e.classId).join(', ');
       issues.push({
         type: 'error',
         category: 'hard_constraint',
         code: 'TEACHER_COLLISION',
-        message: `Giáo viên ${tch?.fullName || teacherId} bị trùng lịch dạy cùng lúc cho các lớp (${classNames}) tại Thứ ${dayStr}, Tiết ${periodStr}.`,
+        message: `Trùng tiết giáo viên: Giáo viên ${tch?.fullName || teacherId} bị xếp trùng lịch dạy cùng lúc cho các lớp (${classNames}) tại Thứ ${dayStr}, Tiết ${periodStr}.`,
         details: {
           teacherId,
           teacherName: tch?.fullName,
           dayOfWeek: dayStr,
-          period: periodStr
+          period: periodStr,
+          conflictingEntries: list.map(e => e.id)
         },
-        recommendation: 'Di chuyển một trong các tiết dạy của giáo viên này.'
+        recommendation: 'Chuyển tiết dạy của một trong các lớp sang tiết khác hoặc ngày khác để đảm bảo giáo viên chỉ dạy 1 lớp tại một thời điểm.'
       });
     }
   });

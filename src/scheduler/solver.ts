@@ -214,42 +214,42 @@ export function solveTimetable(
   const getSlotKey = (day: number, period: number) => `${day}_${period}`;
 
   const canTeacherDoubleBook = (teacherId: string, classId: string, subjectId: string, day: number, period: number): boolean => {
+    if (!teacherId) return true;
     const slotKey = getSlotKey(day, period);
     const existingEntries = teacherOccupancy.get(teacherId)?.get(slotKey);
-    if (!existingEntries || existingEntries.length === 0) return true;
-    const tch = state.teachers.find(t => t.id === teacherId);
-    if (!tch?.allowDoubleBooking) return false;
-    if (existingEntries.length >= 2) return false; // Max 2 classes simultaneously
-
-    const newCls = state.classes.find(c => c.id === classId);
-    const existingEntry = existingEntries[0];
-    const existingCls = state.classes.find(c => c.id === existingEntry.classId);
-
-    const isSameGrade = existingCls?.gradeId && newCls?.gradeId && existingCls.gradeId === newCls.gradeId;
-    return !!isSameGrade;
+    if (existingEntries && existingEntries.length > 0) {
+      // STRICT HARD CONSTRAINT: Zero teacher double booking.
+      // Một giáo viên tuyệt đối không thể dạy 2 lớp cùng một lúc (cùng thứ, cùng tiết).
+      return false;
+    }
+    return true;
   };
 
   const setOccupied = (entry: TimetableEntry) => {
     if (!classOccupancy.has(entry.classId)) classOccupancy.set(entry.classId, new Map());
     classOccupancy.get(entry.classId)!.set(getSlotKey(entry.dayOfWeek, entry.period), entry);
 
-    if (!teacherOccupancy.has(entry.teacherId)) teacherOccupancy.set(entry.teacherId, new Map());
-    const tMap = teacherOccupancy.get(entry.teacherId)!;
-    const slotKey = getSlotKey(entry.dayOfWeek, entry.period);
-    if (!tMap.has(slotKey)) tMap.set(slotKey, []);
-    tMap.get(slotKey)!.push(entry);
+    if (entry.teacherId) {
+      if (!teacherOccupancy.has(entry.teacherId)) teacherOccupancy.set(entry.teacherId, new Map());
+      const tMap = teacherOccupancy.get(entry.teacherId)!;
+      const slotKey = getSlotKey(entry.dayOfWeek, entry.period);
+      if (!tMap.has(slotKey)) tMap.set(slotKey, []);
+      tMap.get(slotKey)!.push(entry);
+    }
   };
 
   const clearOccupied = (entry: TimetableEntry) => {
     classOccupancy.get(entry.classId)?.delete(getSlotKey(entry.dayOfWeek, entry.period));
-    const tMap = teacherOccupancy.get(entry.teacherId);
-    if (tMap) {
-      const slotKey = getSlotKey(entry.dayOfWeek, entry.period);
-      const list = tMap.get(slotKey);
-      if (list) {
-        const idx = list.findIndex(e => e.id === entry.id || e.classId === entry.classId);
-        if (idx !== -1) list.splice(idx, 1);
-        if (list.length === 0) tMap.delete(slotKey);
+    if (entry.teacherId) {
+      const tMap = teacherOccupancy.get(entry.teacherId);
+      if (tMap) {
+        const slotKey = getSlotKey(entry.dayOfWeek, entry.period);
+        const list = tMap.get(slotKey);
+        if (list) {
+          const idx = list.findIndex(e => e.id === entry.id || e.classId === entry.classId);
+          if (idx !== -1) list.splice(idx, 1);
+          if (list.length === 0) tMap.delete(slotKey);
+        }
       }
     }
   };
@@ -257,7 +257,7 @@ export function solveTimetable(
   const isSlotFree = (classId: string, teacherId: string, day: number, period: number, subjectId: string): boolean => {
     const slotKey = getSlotKey(day, period);
     if (classOccupancy.get(classId)?.has(slotKey)) return false;
-    if (!canTeacherDoubleBook(teacherId, classId, subjectId, day, period)) return false;
+    if (teacherId && teacherOccupancy.get(teacherId)?.has(slotKey)) return false;
     if (isSlotHoliday(classId, day, period)) return false;
     if (isTeacherUnavailable(teacherId, day, period)) return false;
     return true;
@@ -467,10 +467,10 @@ export function solveTimetable(
 
             allPeriods.forEach(period => {
               const occupiedByClass = currentSolution.some(e => e.classId === a.classId && e.dayOfWeek === day && e.period === period);
-              const teacherCanBook = canTeacherDoubleBook(a.teacherId, a.classId, a.subjectId, day, period);
+              const teacherIsBusy = a.teacherId ? currentSolution.some(e => e.teacherId === a.teacherId && e.dayOfWeek === day && e.period === period) : false;
               const isConsecutive = sameTeacherClassEntriesOnDay.some(e => Math.abs(e.period - period) === 1);
 
-              if (!occupiedByClass && teacherCanBook && !isConsecutive) {
+              if (!occupiedByClass && !teacherIsBusy && !isConsecutive) {
                 // Score: lower is better. Prefer days with 0 same subject over 1.
                 let score = sameSubjectCountOnDay * 100;
                 // Also prefer morning for 2-session or morning shift
@@ -490,7 +490,7 @@ export function solveTimetable(
           if (candidateSlots.length > 0) {
             const slot = candidateSlots[0];
             const session = slot.period <= state.timeSlotConfig.morningPeriodsCount ? 'morning' : 'afternoon';
-            currentSolution.push({
+            const newEntry: TimetableEntry = {
               id: `entry_force_${a.classId}_${slot.day}_${slot.period}_${Date.now()}_${Math.random().toString(36).substr(2,3)}`,
               timetableId: 'current',
               weekId,
@@ -502,11 +502,13 @@ export function solveTimetable(
               componentId: a.componentId,
               teacherId: a.teacherId,
               isLocked: false
-            });
+            };
+            currentSolution.push(newEntry);
+            setOccupied(newEntry);
             placed = true;
           }
 
-          // If still not placed because of strict daily limit constraint, relax limit but STRICTLY enforce non-consecutive so le
+          // If still not placed because of strict daily limit constraint, relax limit but STRICTLY enforce non-consecutive so le AND zero teacher collision
           if (!placed) {
             for (const day of activeDays) {
               if (placed) break;
@@ -517,12 +519,12 @@ export function solveTimetable(
               for (const period of allPeriods) {
                 if (placed) break;
                 const occupiedByClass = currentSolution.some(e => e.classId === a.classId && e.dayOfWeek === day && e.period === period);
-                const teacherCanBook = canTeacherDoubleBook(a.teacherId, a.classId, a.subjectId, day, period);
+                const teacherIsBusy = a.teacherId ? currentSolution.some(e => e.teacherId === a.teacherId && e.dayOfWeek === day && e.period === period) : false;
                 const isConsecutive = sameTeacherClassEntriesOnDay.some(e => Math.abs(e.period - period) === 1);
 
-                if (!occupiedByClass && teacherCanBook && !isConsecutive) {
+                if (!occupiedByClass && !teacherIsBusy && !isConsecutive) {
                   const session = period <= state.timeSlotConfig.morningPeriodsCount ? 'morning' : 'afternoon';
-                  currentSolution.push({
+                  const newEntry: TimetableEntry = {
                     id: `entry_forcerelax_${a.classId}_${day}_${period}_${Date.now()}_${Math.random().toString(36).substr(2,3)}`,
                     timetableId: 'current',
                     weekId,
@@ -534,7 +536,9 @@ export function solveTimetable(
                     componentId: a.componentId,
                     teacherId: a.teacherId,
                     isLocked: false
-                  });
+                  };
+                  currentSolution.push(newEntry);
+                  setOccupied(newEntry);
                   placed = true;
                 }
               }

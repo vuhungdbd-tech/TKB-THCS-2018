@@ -728,10 +728,10 @@ export const ConstraintsView: React.FC = () => {
               <div className="bg-slate-950/60 p-4 rounded-xl border border-indigo-500/20 space-y-2">
                 <div className="flex items-center space-x-2 text-indigo-300 font-bold">
                   <Check className="w-4 h-4 text-emerald-400" />
-                  <span>3. So le Khối & Trùng tiết Cùng Khối</span>
+                  <span>3. Tuyệt đối không trùng tiết Giáo viên</span>
                 </div>
                 <p className="text-slate-300 leading-relaxed">
-                  Giáo viên dạy nhiều khối được xếp <strong className="text-white">so le giữa các khối</strong> (tránh đè giờ) và cho phép <strong className="text-white">dạy các lớp trong cùng một khối</strong> trong buổi mà không bị kẹt lịch.
+                  Một giáo viên <strong className="text-rose-300">không thể cùng lúc dạy 2 lớp tại cùng một tiết</strong> (VD: Thầy Huấn dạy Toán không thể vừa dạy Tiết 1 lớp 8C8 vừa dạy Tiết 1 lớp 8C9). Hệ thống khóa cứng 100% chống trùng lịch cả trong cùng khối lẫn khác khối.
                 </p>
               </div>
             </div>
