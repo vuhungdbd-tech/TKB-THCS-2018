@@ -20,6 +20,18 @@ export const AssignmentsView: React.FC = () => {
 
   const [savedMsg, setSavedMsg] = useState(false);
 
+  React.useEffect(() => {
+    store.sanitizeAndCleanAssignments();
+    setMasterList([...store.getState().masterAssignments]);
+    setWeeklyList([...store.getWeeklyAssignments(currentWeek.id)]);
+
+    const unsub = store.subscribe(() => {
+      setMasterList([...store.getState().masterAssignments]);
+      setWeeklyList([...store.getWeeklyAssignments(store.getCurrentWeek().id)]);
+    });
+    return unsub;
+  }, []);
+
   // Edit Teacher Info Modal state
   const [showEditTeacherModal, setShowEditTeacherModal] = useState(false);
   const [editTeacherData, setEditTeacherData] = useState<{
@@ -387,14 +399,11 @@ export const AssignmentsView: React.FC = () => {
 
   const handleCleanDuplicates = () => {
     const count = store.cleanDuplicateAssignments(mode === 'weekly' ? currentWeek.id : undefined);
-    if (mode === 'master') {
-      setMasterList([...store.getState().masterAssignments]);
-    } else {
-      setWeeklyList([...store.getWeeklyAssignments(currentWeek.id)]);
-    }
+    setMasterList([...store.getState().masterAssignments]);
+    setWeeklyList([...store.getWeeklyAssignments(currentWeek.id)]);
     setSavedMsg(true);
     setTimeout(() => setSavedMsg(false), 3000);
-    alert(`Đã tự động gỡ bỏ và hợp nhất ${count} bản ghi phân công trùng lặp thành công!`);
+    alert(`Đã tự động chuẩn hóa, dọn dẹp ${count} bản ghi phân công rác/trùng lặp và tính lại định mức số tiết chính xác!`);
   };
 
   const handleVerifyAssignments = () => {
@@ -934,35 +943,55 @@ export const AssignmentsView: React.FC = () => {
             </div>
 
             {/* Teaching Load Badge */}
-            <div className="bg-slate-950 border border-slate-800 rounded-xl p-3 flex items-center justify-between text-xs">
-              <span className="text-slate-400 font-medium">Tải dạy hiện tại:</span>
-              <span className="bg-indigo-500/10 text-indigo-300 border border-indigo-500/20 font-bold px-3 py-1 rounded-lg">
-                {activeMasterList.filter(a => a.teacherId === selectedTeacherId).reduce((sum, a) => sum + a.periodsPerWeek, 0)} tiết phân công
-              </span>
-            </div>
+            {(() => {
+              const currentList = mode === 'master' ? masterList : weeklyList;
+              const validAsgs = currentList.filter(
+                a => a.teacherId === selectedTeacherId &&
+                     state.classes.some(c => c.id === a.classId) &&
+                     state.subjects.some(s => s.id === a.subjectId)
+              );
+              // Deduplicate for accurate counting
+              const uniqueMap = new Map<string, typeof validAsgs[0]>();
+              validAsgs.forEach(a => {
+                const k = `${a.classId}_${a.subjectId}_${a.componentId || 'none'}`;
+                if (!uniqueMap.has(k)) uniqueMap.set(k, a);
+              });
+              const teacherPeriods = Array.from(uniqueMap.values()).reduce((sum, a) => sum + (Number(a.periodsPerWeek) || 0), 0);
 
-            {/* Normal & Supplementary Period Boxes */}
-            <div className="grid grid-cols-2 gap-3">
-              <div className="bg-slate-950 border border-slate-800 rounded-xl p-3.5 space-y-2">
-                <div className="text-[11px] text-slate-400 font-semibold uppercase leading-tight">
-                  TIẾT BÌNH THƯỜNG <span className="text-[10px] text-slate-500 block font-normal">(Thực dạy: {activeMasterList.filter(a => a.teacherId === selectedTeacherId).reduce((sum, a) => sum + a.periodsPerWeek, 0)})</span>
-                </div>
-                <div className="bg-slate-900 border border-slate-800 rounded-lg p-2 text-center text-white font-bold text-sm">
-                  {activeMasterList.filter(a => a.teacherId === selectedTeacherId).reduce((sum, a) => sum + a.periodsPerWeek, 0)}
-                </div>
-              </div>
+              return (
+                <>
+                  <div className="bg-slate-950 border border-slate-800 rounded-xl p-3 flex items-center justify-between text-xs">
+                    <span className="text-slate-400 font-medium">Tải dạy hiện tại:</span>
+                    <span className="bg-indigo-500/10 text-indigo-300 border border-indigo-500/20 font-bold px-3 py-1 rounded-lg">
+                      {teacherPeriods} tiết phân công
+                    </span>
+                  </div>
 
-              <div className="bg-slate-950 border border-slate-800 rounded-xl p-3.5 space-y-2">
-                <div className="text-[11px] text-slate-400 font-semibold uppercase leading-tight">
-                  TIẾT BỔ SUNG <span className="text-[10px] text-slate-500 block font-normal">(Thực dạy: 0)</span>
-                </div>
-                <input
-                  type="number" min="0" max="20"
-                  defaultValue={0}
-                  className="w-full bg-slate-900 border border-slate-800 rounded-lg p-2 text-center text-indigo-400 font-bold text-sm focus:outline-none focus:border-indigo-500"
-                />
-              </div>
-            </div>
+                  {/* Normal & Supplementary Period Boxes */}
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="bg-slate-950 border border-slate-800 rounded-xl p-3.5 space-y-2">
+                      <div className="text-[11px] text-slate-400 font-semibold uppercase leading-tight">
+                        TIẾT BÌNH THƯỜNG <span className="text-[10px] text-slate-500 block font-normal">(Thực dạy: {teacherPeriods})</span>
+                      </div>
+                      <div className="bg-slate-900 border border-slate-800 rounded-lg p-2 text-center text-white font-bold text-sm">
+                        {teacherPeriods}
+                      </div>
+                    </div>
+
+                    <div className="bg-slate-950 border border-slate-800 rounded-xl p-3.5 space-y-2">
+                      <div className="text-[11px] text-slate-400 font-semibold uppercase leading-tight">
+                        TIẾT BỔ SUNG <span className="text-[10px] text-slate-500 block font-normal">(Thực dạy: 0)</span>
+                      </div>
+                      <input
+                        type="number" min="0" max="20"
+                        defaultValue={0}
+                        className="w-full bg-slate-900 border border-slate-800 rounded-lg p-2 text-center text-indigo-400 font-bold text-sm focus:outline-none focus:border-indigo-500"
+                      />
+                    </div>
+                  </div>
+                </>
+              );
+            })()}
 
             {/* Max limits per week / session */}
             <div className="grid grid-cols-2 gap-3 pt-2 border-t border-slate-800">
@@ -1001,7 +1030,12 @@ export const AssignmentsView: React.FC = () => {
               {/* Subject Assignment Cards with interactive class pills */}
               <div className="space-y-4">
                 {(() => {
-                  const teacherAssignments = (mode === 'master' ? masterList : weeklyList).filter(a => a.teacherId === selectedTeacherId);
+                  const currentList = mode === 'master' ? masterList : weeklyList;
+                  const teacherAssignments = currentList.filter(
+                    a => a.teacherId === selectedTeacherId &&
+                         state.subjects.some(s => s.id === a.subjectId) &&
+                         state.classes.some(c => c.id === a.classId)
+                  );
                   
                   // Extract unique subjects/components assigned to this teacher
                   const assignedSubjects = new Map<string, { subjectId: string; componentId?: string; classIds: string[] }>();
@@ -1010,11 +1044,14 @@ export const AssignmentsView: React.FC = () => {
                     if (!assignedSubjects.has(key)) {
                       assignedSubjects.set(key, { subjectId: a.subjectId, componentId: a.componentId, classIds: [] });
                     }
-                    assignedSubjects.get(key)?.classIds.push(a.classId);
+                    const entry = assignedSubjects.get(key);
+                    if (entry && !entry.classIds.includes(a.classId)) {
+                      entry.classIds.push(a.classId);
+                    }
                   });
 
-                  // If teacher has no assignments yet, show main subject
-                  if (assignedSubjects.size === 0 && selectedTeacherObj?.mainSubjectId) {
+                  // If teacher has no assignments yet, show main subject if valid
+                  if (assignedSubjects.size === 0 && selectedTeacherObj?.mainSubjectId && state.subjects.some(s => s.id === selectedTeacherObj.mainSubjectId)) {
                     assignedSubjects.set(`${selectedTeacherObj.mainSubjectId}_none`, {
                       subjectId: selectedTeacherObj.mainSubjectId,
                       classIds: []
@@ -1032,6 +1069,7 @@ export const AssignmentsView: React.FC = () => {
                   return Array.from(assignedSubjects.entries()).map(([key, item]) => {
                     const sbj = state.subjects.find(s => s.id === item.subjectId);
                     const comp = sbj?.components?.find(c => c.id === item.componentId);
+                    const validClasses = item.classIds.filter(cid => state.classes.some(c => c.id === cid));
 
                     return (
                       <div key={key} className="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-3">
@@ -1041,23 +1079,45 @@ export const AssignmentsView: React.FC = () => {
                               {sbj?.name} {comp ? `- ${comp.name}` : ''}
                             </span>
                             <span className="text-[11px] text-slate-400 font-mono">
-                              ({item.classIds.length} lớp phụ trách)
+                              ({validClasses.length} lớp phụ trách)
                             </span>
                           </div>
 
-                          <button
-                            onClick={() => {
-                              setSelectedSubjectDetail({
-                                subjectId: item.subjectId,
-                                componentId: item.componentId,
-                                subjectName: sbj?.name || '',
-                                componentName: comp?.name
-                              });
-                            }}
-                            className="text-xs text-indigo-400 hover:text-indigo-300 flex items-center space-x-1 font-medium bg-indigo-500/10 px-2.5 py-1 rounded-lg border border-indigo-500/20 transition"
-                          >
-                            <span>⌖ Chi tiết tiết/phân môn</span>
-                          </button>
+                          <div className="flex items-center space-x-2">
+                            <button
+                              onClick={() => {
+                                setSelectedSubjectDetail({
+                                  subjectId: item.subjectId,
+                                  componentId: item.componentId,
+                                  subjectName: sbj?.name || '',
+                                  componentName: comp?.name
+                                });
+                              }}
+                              className="text-xs text-indigo-400 hover:text-indigo-300 flex items-center space-x-1 font-medium bg-indigo-500/10 px-2.5 py-1 rounded-lg border border-indigo-500/20 transition"
+                            >
+                              <span>⌖ Chi tiết tiết/phân môn</span>
+                            </button>
+
+                            <button
+                              onClick={() => {
+                                if (confirm(`Bạn có chắc muốn bỏ toàn bộ phân công môn ${sbj?.name || ''} khỏi GV ${selectedTeacherObj?.fullName}?`)) {
+                                  const currentList = mode === 'master' ? masterList : weeklyList;
+                                  const newList = currentList.filter(
+                                    a => !(a.teacherId === selectedTeacherId && a.subjectId === item.subjectId && (item.componentId ? a.componentId === item.componentId : !a.componentId))
+                                  );
+                                  if (mode === 'master') {
+                                    syncMaster(newList);
+                                  } else {
+                                    syncWeekly(newList);
+                                  }
+                                }
+                              }}
+                              className="text-xs text-rose-400 hover:text-rose-300 flex items-center space-x-1 font-medium bg-rose-500/10 px-2.5 py-1 rounded-lg border border-rose-500/20 transition"
+                              title="Xóa môn này khỏi GV"
+                            >
+                              <span>✕ Bỏ môn này</span>
+                            </button>
+                          </div>
                         </div>
 
                         {/* Class Pills Grid */}
@@ -1070,44 +1130,51 @@ export const AssignmentsView: React.FC = () => {
                               return (
                                 <button
                                   key={cls.id}
-                                    onClick={() => {
+                                  onClick={() => {
                                     const currentList = mode === 'master' ? masterList : weeklyList;
-                                    const existingIndex = currentList.findIndex(
+                                    const existingMatches = currentList.filter(
                                       a => a.classId === cls.id && a.subjectId === item.subjectId && (item.componentId ? a.componentId === item.componentId : !a.componentId)
                                     );
 
-                                    if (existingIndex >= 0) {
-                                      const existing = currentList[existingIndex];
-                                      if (existing.teacherId === selectedTeacherId) {
-                                        // Remove assignment
+                                    if (existingMatches.length > 0) {
+                                      const isAssignedToThisTeacher = existingMatches.some(a => a.teacherId === selectedTeacherId);
+                                      if (isAssignedToThisTeacher) {
+                                        // Remove ALL matching assignments for this class + subject + component
+                                        const newList = currentList.filter(
+                                          a => !(a.classId === cls.id && a.subjectId === item.subjectId && (item.componentId ? a.componentId === item.componentId : !a.componentId))
+                                        );
                                         if (mode === 'master') {
-                                          const newList = masterList.filter((_, idx) => idx !== existingIndex);
                                           syncMaster(newList);
                                         } else {
-                                          const newList = weeklyList.filter((_, idx) => idx !== existingIndex);
                                           syncWeekly(newList);
                                         }
                                       } else {
                                         // Reassign to selected teacher with confirmation
-                                        const oldTch = state.teachers.find(t => t.id === existing.teacherId);
+                                        const oldTch = state.teachers.find(t => t.id === existingMatches[0].teacherId);
                                         const newTch = selectedTeacherObj;
                                         const sbjDisplay = comp ? `${sbj?.name} (${comp.name})` : sbj?.name;
                                         if (!confirm(`⚠️ CẢNH BÁO TRÙNG PHÂN CÔNG MÔN HỌC:\n\nLớp ${cls.name} hiện đã được phân công môn ${sbjDisplay} cho GV ${oldTch?.fullName || 'khác'}.\n\nBạn có muốn chuyển phân công môn này sang cho GV ${newTch?.fullName} không?`)) {
                                           return;
                                         }
+                                        const filtered = currentList.filter(
+                                          a => !(a.classId === cls.id && a.subjectId === item.subjectId && (item.componentId ? a.componentId === item.componentId : !a.componentId))
+                                        );
+                                        const defaultP = existingMatches[0]?.periodsPerWeek || comp?.defaultPeriodsPerWeek || sbj?.defaultPeriodsPerWeek || 3;
+                                        const updatedAsg = {
+                                          ...existingMatches[0],
+                                          teacherId: selectedTeacherId,
+                                          periodsPerWeek: defaultP
+                                        };
+                                        const newList = [...filtered, updatedAsg];
                                         if (mode === 'master') {
-                                          const newList = [...masterList];
-                                          newList[existingIndex] = { ...existing, teacherId: selectedTeacherId };
                                           syncMaster(newList);
                                         } else {
-                                          const newList = [...weeklyList];
-                                          newList[existingIndex] = { ...existing, teacherId: selectedTeacherId };
                                           syncWeekly(newList);
                                         }
                                       }
                                     } else {
-                                      // Create new assignment
-                                      const defaultP = comp?.defaultPeriodsPerWeek || sbj?.defaultPeriodsPerWeek || 2;
+                                      // Create new assignment cleanly
+                                      const defaultP = comp?.defaultPeriodsPerWeek || sbj?.defaultPeriodsPerWeek || 3;
                                       const newAsg = {
                                         id: `asg_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
                                         academicYearId: currentWeek.academicYearId,
@@ -1120,11 +1187,10 @@ export const AssignmentsView: React.FC = () => {
                                         isCustomized: true
                                       };
 
+                                      const newList = [...currentList, newAsg];
                                       if (mode === 'master') {
-                                        const newList = [...masterList, newAsg];
                                         syncMaster(newList);
                                       } else {
-                                        const newList = [...weeklyList, newAsg];
                                         syncWeekly(newList);
                                       }
                                     }
