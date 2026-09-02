@@ -704,24 +704,34 @@ export const ConstraintsView: React.FC = () => {
               </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs pt-2">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs pt-2">
               <div className="bg-slate-950/60 p-4 rounded-xl border border-indigo-500/20 space-y-2">
                 <div className="flex items-center space-x-2 text-indigo-300 font-bold">
                   <Check className="w-4 h-4 text-emerald-400" />
-                  <span>1. Nguyên tắc So le giữa các Khối (Cross-Grade Staggering)</span>
+                  <span>1. Phân bổ rải đều các ngày (Không trùng tiết)</span>
                 </div>
                 <p className="text-slate-300 leading-relaxed">
-                  Thuật toán đảm bảo giáo viên dạy đơn môn (như Tiếng Anh, Thể dục) <strong className="text-white">không bao giờ bị trùng giờ giữa các Khối lớp khác nhau</strong> (VD: Khối 6 học Sáng Thứ 2 thì Khối 7 sẽ đẩy sang Sáng Thứ 3/Thứ 4).
+                  Các môn học được phân bổ <strong className="text-white">mỗi ngày tối đa 1 tiết</strong>, trừ các môn vượt quá số ngày trong tuần (như <strong className="text-indigo-300">Tiếng Anh</strong> có số tiết cao được phép bố trí nhiều hơn 1 tiết/ngày).
                 </p>
               </div>
 
               <div className="bg-slate-950/60 p-4 rounded-xl border border-indigo-500/20 space-y-2">
                 <div className="flex items-center space-x-2 text-indigo-300 font-bold">
                   <Check className="w-4 h-4 text-emerald-400" />
-                  <span>2. Nguyên tắc Trùng/Gộp tiết Cùng Khối (Same-Grade Parallel)</span>
+                  <span>2. Bố trí Dạy So Le (Không 2 tiết liền nhau)</span>
                 </div>
                 <p className="text-slate-300 leading-relaxed">
-                  Với môn nhiều tiết (Tiếng Anh, Thể Dục), thuật toán cho phép <strong className="text-white">xếp trùng tiết hoặc dồn tiết liên tiếp cho các lớp trong CÙNG MỘT KHỐI</strong> (VD: 6A1 học tiết 1, 6A2 học tiết 2), giúp giáo viên xử lý dứt điểm từng khối lớp mà không kẹt lịch.
+                  Tuyệt đối <strong className="text-rose-300">không bố trí 2 tiết liền nhau của một giáo viên dạy cùng một lớp</strong> trong ngày (VD: Không xếp Tiết 1 & 2; phải xếp so le cách tiết như Tiết 1 & 3, Tiết 2 & 4 hoặc Sáng - Chiều).
+                </p>
+              </div>
+
+              <div className="bg-slate-950/60 p-4 rounded-xl border border-indigo-500/20 space-y-2">
+                <div className="flex items-center space-x-2 text-indigo-300 font-bold">
+                  <Check className="w-4 h-4 text-emerald-400" />
+                  <span>3. So le Khối & Trùng tiết Cùng Khối</span>
+                </div>
+                <p className="text-slate-300 leading-relaxed">
+                  Giáo viên dạy nhiều khối được xếp <strong className="text-white">so le giữa các khối</strong> (tránh đè giờ) và cho phép <strong className="text-white">dạy các lớp trong cùng một khối</strong> trong buổi mà không bị kẹt lịch.
                 </p>
               </div>
             </div>

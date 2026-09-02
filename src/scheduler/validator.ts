@@ -256,5 +256,67 @@ export function validateTimetable(
     }
   });
 
+  // 7. Check Consecutive Periods of the Same Teacher in the Same Class (Quy tắc So le / Không dạy 2 tiết liền nhau)
+  const teacherClassDailyEntries = new Map<string, TimetableEntry[]>();
+  entries.forEach(e => {
+    if (!e.teacherId) return;
+    const key = `${e.classId}_${e.teacherId}_${e.dayOfWeek}`;
+    if (!teacherClassDailyEntries.has(key)) teacherClassDailyEntries.set(key, []);
+    teacherClassDailyEntries.get(key)!.push(e);
+  });
+
+  teacherClassDailyEntries.forEach((groupEntries, key) => {
+    if (groupEntries.length > 1) {
+      const sorted = [...groupEntries].sort((a, b) => a.period - b.period);
+      for (let i = 0; i < sorted.length - 1; i++) {
+        if (sorted[i + 1].period - sorted[i].period === 1) {
+          const sample = sorted[i];
+          const cls = state.classes.find(c => c.id === sample.classId);
+          const tch = state.teachers.find(t => t.id === sample.teacherId);
+          const sbj1 = state.subjects.find(s => s.id === sorted[i].subjectId);
+          const sbj2 = state.subjects.find(s => s.id === sorted[i + 1].subjectId);
+
+          issues.push({
+            type: 'warning',
+            category: 'soft_constraint',
+            code: 'CONSECUTIVE_TEACHER_CLASS_VIOLATION',
+            message: `GV ${tch?.fullName || sample.teacherId} dạy 2 tiết liền nhau (${sbj1?.name} Tiết ${sorted[i].period} và ${sbj2?.name} Tiết ${sorted[i + 1].period}, Thứ ${sample.dayOfWeek}) tại Lớp ${cls?.name}. Cần bố trí dạy so le cách tiết.`,
+            details: { classId: sample.classId, teacherId: sample.teacherId, dayOfWeek: sample.dayOfWeek, period: sorted[i].period },
+            recommendation: 'Chuyển một trong hai tiết sang tiết khác hoặc ngày khác để đảm bảo nguyên tắc so le.'
+          });
+        }
+      }
+    }
+  });
+
+  // 8. Check Subject Daily Overload (Không quá 1 tiết/ngày nếu số tiết tuần <= số ngày học)
+  const activeDaysCount = state.dayConfigs ? state.dayConfigs.filter(d => d.isActive).length : 6;
+  const classSubjectDailyEntries = new Map<string, TimetableEntry[]>();
+  entries.forEach(e => {
+    const key = `${e.classId}_${e.subjectId}_${e.dayOfWeek}`;
+    if (!classSubjectDailyEntries.has(key)) classSubjectDailyEntries.set(key, []);
+    classSubjectDailyEntries.get(key)!.push(e);
+  });
+
+  classSubjectDailyEntries.forEach((groupEntries, key) => {
+    const sample = groupEntries[0];
+    const matchedAsg = weeklyAssignments.find(a => a.classId === sample.classId && a.subjectId === sample.subjectId);
+    const weeklyPeriods = matchedAsg?.periodsPerWeek || 3;
+    const maxAllowedPerDay = weeklyPeriods > activeDaysCount ? Math.ceil(weeklyPeriods / activeDaysCount) : 1;
+
+    if (groupEntries.length > maxAllowedPerDay) {
+      const cls = state.classes.find(c => c.id === sample.classId);
+      const sbj = state.subjects.find(s => s.id === sample.subjectId);
+      issues.push({
+        type: 'warning',
+        category: 'soft_constraint',
+        code: 'SAME_SUBJECT_DAILY_OVERLOAD',
+        message: `Lớp ${cls?.name} bị xếp ${groupEntries.length} tiết môn ${sbj?.name} trong cùng ngày Thứ ${sample.dayOfWeek} (Mức tối ưu là ${maxAllowedPerDay} tiết/ngày vì môn này có ${weeklyPeriods} tiết/tuần).`,
+        details: { classId: sample.classId, subjectId: sample.subjectId, dayOfWeek: sample.dayOfWeek },
+        recommendation: 'Rải đều các tiết môn học sang các ngày khác trong tuần.'
+      });
+    }
+  });
+
   return issues;
 }

@@ -305,25 +305,37 @@ export function solveTimetable(
         if (classShift === 'afternoon' && isMorningPeriod) return;
 
         if (isSlotFree(unit.classId, unit.teacherId, day, period, unit.subjectId)) {
-          // Check same subject count on this day for this class
+          // 1. Check same subject count on this day for this class:
+          // Không được phép trùng tiết các ngày trong tuần trừ khi môn học vượt quá số ngày trong tuần (VD: Tiếng Anh)
+          const asg = assignments.find(a => a.id === unit.assignmentId);
+          const totalPeriodsForThisSubject = asg?.periodsPerWeek || 3;
+          const maxAllowedPerDayForSubject = totalPeriodsForThisSubject > activeDays.length
+            ? Math.ceil(totalPeriodsForThisSubject / Math.max(1, activeDays.length))
+            : 1;
+
           const sameSubjectEntriesOnDay = currentSolution.filter(
             e => e.classId === unit.classId && e.subjectId === unit.subjectId && e.dayOfWeek === day
           );
 
-          // STRICT RULE: Max 2 periods of the same subject per day. Disallow 3rd or more (e.g. avoid period 1, 2, 3, 4 same subject).
-          if (sameSubjectEntriesOnDay.length >= 2) return;
+          if (sameSubjectEntriesOnDay.length >= maxAllowedPerDayForSubject) return;
+
+          // 2. STRICT RULE: "Bố trí Dạy so le không được bố trí 2 tiết liền nhau của một người dạy cùng một lớp."
+          const sameTeacherClassEntriesOnDay = currentSolution.filter(
+            e => e.classId === unit.classId && e.teacherId === unit.teacherId && e.dayOfWeek === day
+          );
+          const isConsecutiveForSameTeacherClass = sameTeacherClassEntriesOnDay.some(
+            e => Math.abs(e.period - period) === 1
+          );
+          if (isConsecutiveForSameTeacherClass) {
+            // Strictly reject consecutive periods for the same teacher in the same class (must be staggered / so le)
+            return;
+          }
 
           // Calculate heuristic score for placing unit here
           let score = 0;
 
-          if (sameSubjectEntriesOnDay.length === 1) {
-            score += 100; // heavy penalty for having 2 periods of same subject on same day
-
-            // Check if consecutive (period - 1 or period + 1)
-            const isConsecutive = sameSubjectEntriesOnDay.some(e => Math.abs(e.period - period) === 1);
-            if (isConsecutive) {
-              score += 300; // extremely high penalty for consecutive same subject periods
-            }
+          if (sameSubjectEntriesOnDay.length > 0) {
+            score += 80; // Penalty for 2nd period on same day even when allowed by workload
           }
 
           // Soft avoid slot penalty
@@ -442,13 +454,23 @@ export function solveTimetable(
               e => e.classId === a.classId && e.subjectId === a.subjectId && e.dayOfWeek === day
             ).length;
 
-            // STRICT: max 2 periods of same subject per day
-            if (sameSubjectCountOnDay >= 2) return;
+            const maxAllowedPerDayForSubject = a.periodsPerWeek > activeDays.length
+              ? Math.ceil(a.periodsPerWeek / Math.max(1, activeDays.length))
+              : 1;
+
+            if (sameSubjectCountOnDay >= maxAllowedPerDayForSubject) return;
+
+            // Check if teacher already has an adjacent period in this class (không được 2 tiết liền nhau)
+            const sameTeacherClassEntriesOnDay = currentSolution.filter(
+              e => e.classId === a.classId && e.teacherId === a.teacherId && e.dayOfWeek === day
+            );
 
             allPeriods.forEach(period => {
               const occupiedByClass = currentSolution.some(e => e.classId === a.classId && e.dayOfWeek === day && e.period === period);
               const teacherCanBook = canTeacherDoubleBook(a.teacherId, a.classId, a.subjectId, day, period);
-              if (!occupiedByClass && teacherCanBook) {
+              const isConsecutive = sameTeacherClassEntriesOnDay.some(e => Math.abs(e.period - period) === 1);
+
+              if (!occupiedByClass && teacherCanBook && !isConsecutive) {
                 // Score: lower is better. Prefer days with 0 same subject over 1.
                 let score = sameSubjectCountOnDay * 100;
                 // Also prefer morning for 2-session or morning shift
@@ -484,15 +506,21 @@ export function solveTimetable(
             placed = true;
           }
 
-          // If still not placed because of strict sameSubjectCount < 2 constraint, relax and place in ANY free slot
+          // If still not placed because of strict daily limit constraint, relax limit but STRICTLY enforce non-consecutive so le
           if (!placed) {
             for (const day of activeDays) {
               if (placed) break;
+              const sameTeacherClassEntriesOnDay = currentSolution.filter(
+                e => e.classId === a.classId && e.teacherId === a.teacherId && e.dayOfWeek === day
+              );
+
               for (const period of allPeriods) {
                 if (placed) break;
                 const occupiedByClass = currentSolution.some(e => e.classId === a.classId && e.dayOfWeek === day && e.period === period);
                 const teacherCanBook = canTeacherDoubleBook(a.teacherId, a.classId, a.subjectId, day, period);
-                if (!occupiedByClass && teacherCanBook) {
+                const isConsecutive = sameTeacherClassEntriesOnDay.some(e => Math.abs(e.period - period) === 1);
+
+                if (!occupiedByClass && teacherCanBook && !isConsecutive) {
                   const session = period <= state.timeSlotConfig.morningPeriodsCount ? 'morning' : 'afternoon';
                   currentSolution.push({
                     id: `entry_forcerelax_${a.classId}_${day}_${period}_${Date.now()}_${Math.random().toString(36).substr(2,3)}`,
