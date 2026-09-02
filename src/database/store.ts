@@ -376,6 +376,20 @@ class Store {
     }
   }
 
+  public updateMasterData(data: {
+    classes?: ClassRoom[];
+    subjects?: Subject[];
+    teachers?: Teacher[];
+    masterAssignments?: MasterAssignment[];
+  }) {
+    if (data.classes && data.classes.length > 0) this.state.classes = data.classes;
+    if (data.subjects && data.subjects.length > 0) this.state.subjects = data.subjects;
+    if (data.teachers && data.teachers.length > 0) this.state.teachers = data.teachers;
+    if (data.masterAssignments && data.masterAssignments.length > 0) this.state.masterAssignments = data.masterAssignments;
+    this.addAuditLog('Nhập dữ liệu Excel', `Đã cập nhật danh mục và phân công từ file Excel`);
+    this.save();
+  }
+
   public syncTimetableWithAssignments(weekId: string): number {
     const assignments = this.getWeeklyAssignments(weekId);
     const ver = this.getTimetableVersion(weekId);
