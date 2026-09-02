@@ -96,7 +96,7 @@ class Store {
 
   constructor() {
     this.state = this.loadFromStorage();
-    this.autoRepairMissingTeachers();
+    this.sanitizeAndCleanAssignments();
     // Khởi tạo kiểm tra và đồng bộ Supabase ngay lập tức
     this.initCloudSync();
   }
@@ -104,6 +104,7 @@ class Store {
   public findBestTeacherForAssignment(subjectId: string, componentId?: string, classId?: string): string {
     const teachers = this.state.teachers;
     if (!teachers || teachers.length === 0) return '';
+    if (!subjectId || !this.state.subjects.some(s => s.id === subjectId)) return '';
 
     // 1. First priority: Teacher qualified for the specific component (e.g. comp_phy, comp_chem, comp_bio, comp_hist, comp_geo)
     if (componentId) {
@@ -137,8 +138,95 @@ class Store {
     );
     if (anySameSubject?.teacherId) return anySameSubject.teacherId;
 
-    // Fallback: first available teacher
-    return teachers[0].id;
+    // Do NOT fallback to teachers[0]! Return empty string if no matching teacher is found.
+    return '';
+  }
+
+  public sanitizeAndCleanAssignments(weekId?: string): { removedCount: number; fixedCount: number } {
+    let removedCount = 0;
+    let fixedCount = 0;
+
+    const validClassIds = new Set(this.state.classes.map(c => c.id));
+    const validSubjectIds = new Set(this.state.subjects.map(s => s.id));
+    const validTeacherIds = new Set(this.state.teachers.map(t => t.id));
+
+    // 1. Sanitize & Deduplicate Master Assignments
+    const uniqueMasterMap = new Map<string, MasterAssignment>();
+
+    this.state.masterAssignments.forEach(asg => {
+      // Check for orphan class or orphan subject
+      if (!asg.classId || !validClassIds.has(asg.classId) || !asg.subjectId || !validSubjectIds.has(asg.subjectId)) {
+        removedCount++;
+        return;
+      }
+
+      const key = `${asg.classId}_${asg.subjectId}_${asg.componentId || 'none'}`;
+      if (uniqueMasterMap.has(key)) {
+        // Duplicate found! Keep the one that already has a valid teacher assigned
+        const existing = uniqueMasterMap.get(key)!;
+        if ((!existing.teacherId || !validTeacherIds.has(existing.teacherId)) && asg.teacherId && validTeacherIds.has(asg.teacherId)) {
+          uniqueMasterMap.set(key, asg);
+        }
+        removedCount++;
+      } else {
+        // Verify teacherId
+        if (asg.teacherId && !validTeacherIds.has(asg.teacherId)) {
+          asg.teacherId = '';
+          fixedCount++;
+        }
+        // Verify periodsPerWeek
+        if (!asg.periodsPerWeek || asg.periodsPerWeek <= 0 || isNaN(asg.periodsPerWeek)) {
+          const sbj = this.state.subjects.find(s => s.id === asg.subjectId);
+          asg.periodsPerWeek = sbj?.defaultPeriodsPerWeek || 3;
+          fixedCount++;
+        }
+        uniqueMasterMap.set(key, asg);
+      }
+    });
+
+    this.state.masterAssignments = Array.from(uniqueMasterMap.values());
+
+    // 2. Sanitize & Deduplicate Weekly Assignments
+    const targetWeeks = weekId ? [weekId] : Object.keys(this.state.weeklyAssignments);
+    targetWeeks.forEach(wId => {
+      const wList = this.state.weeklyAssignments[wId];
+      if (wList && wList.length > 0) {
+        const uniqueWeeklyMap = new Map<string, WeeklyAssignment>();
+        wList.forEach(asg => {
+          if (!asg.classId || !validClassIds.has(asg.classId) || !asg.subjectId || !validSubjectIds.has(asg.subjectId)) {
+            removedCount++;
+            return;
+          }
+          const key = `${asg.classId}_${asg.subjectId}_${asg.componentId || 'none'}`;
+          if (uniqueWeeklyMap.has(key)) {
+            const existing = uniqueWeeklyMap.get(key)!;
+            if ((!existing.teacherId || !validTeacherIds.has(existing.teacherId)) && asg.teacherId && validTeacherIds.has(asg.teacherId)) {
+              uniqueWeeklyMap.set(key, asg);
+            }
+            removedCount++;
+          } else {
+            if (asg.teacherId && !validTeacherIds.has(asg.teacherId)) {
+              asg.teacherId = '';
+              fixedCount++;
+            }
+            if (!asg.periodsPerWeek || asg.periodsPerWeek <= 0 || isNaN(asg.periodsPerWeek)) {
+              const sbj = this.state.subjects.find(s => s.id === asg.subjectId);
+              asg.periodsPerWeek = sbj?.defaultPeriodsPerWeek || 3;
+              fixedCount++;
+            }
+            uniqueWeeklyMap.set(key, asg);
+          }
+        });
+        this.state.weeklyAssignments[wId] = Array.from(uniqueWeeklyMap.values());
+      }
+    });
+
+    if (removedCount > 0 || fixedCount > 0) {
+      this.save(false);
+      this.addAuditLog('Chuẩn hóa phân công', `Đã dọn dẹp ${removedCount} bản ghi thừa/trùng lặp và chuẩn hóa ${fixedCount} bản ghi phân công.`);
+    }
+
+    return { removedCount, fixedCount };
   }
 
   public autoRepairMissingTeachers(weekId?: string): number {
@@ -147,9 +235,12 @@ class Store {
     if (!teachers || teachers.length === 0) return 0;
 
     const teacherMap = new Set(teachers.map(t => t.id));
+    const validClassIds = new Set(this.state.classes.map(c => c.id));
+    const validSubjectIds = new Set(this.state.subjects.map(s => s.id));
 
-    // 1. Fix Master Assignments
+    // 1. Fix Master Assignments only for valid records
     this.state.masterAssignments.forEach(asg => {
+      if (!validClassIds.has(asg.classId) || !validSubjectIds.has(asg.subjectId)) return;
       if (!asg.teacherId || asg.teacherId.trim() === '' || !teacherMap.has(asg.teacherId)) {
         const bestTeacherId = this.findBestTeacherForAssignment(asg.subjectId, asg.componentId, asg.classId);
         if (bestTeacherId) {
@@ -165,6 +256,7 @@ class Store {
       const wList = this.state.weeklyAssignments[wId];
       if (wList && wList.length > 0) {
         wList.forEach(asg => {
+          if (!validClassIds.has(asg.classId) || !validSubjectIds.has(asg.subjectId)) return;
           if (!asg.teacherId || asg.teacherId.trim() === '' || !teacherMap.has(asg.teacherId)) {
             // Check master assignment first
             const masterMatch = this.state.masterAssignments.find(
@@ -719,59 +811,8 @@ class Store {
   }
 
   public cleanDuplicateAssignments(weekId?: string): number {
-    let removedCount = 0;
-
-    // Deduplicate Master Assignments
-    const uniqueMasterMap = new Map<string, MasterAssignment>();
-    const newMasterList: MasterAssignment[] = [];
-
-    this.state.masterAssignments.forEach(asg => {
-      const key = `${asg.classId}_${asg.subjectId}_${asg.componentId || 'none'}`;
-      if (!uniqueMasterMap.has(key)) {
-        uniqueMasterMap.set(key, asg);
-        newMasterList.push(asg);
-      } else {
-        // Duplicate found
-        removedCount++;
-      }
-    });
-
-    if (removedCount > 0) {
-      this.state.masterAssignments = newMasterList;
-      this.addAuditLog('Gỡ trùng phân công', `Đã tự động gỡ ${removedCount} bản ghi phân công gốc trùng lặp.`);
-    }
-
-    // Deduplicate Weekly Assignments if weekId is provided or for all weeks
-    const targetWeeks = weekId ? [weekId] : Object.keys(this.state.weeklyAssignments);
-    targetWeeks.forEach(wId => {
-      const wList = this.state.weeklyAssignments[wId];
-      if (wList && wList.length > 0) {
-        const uniqueWeeklyMap = new Map<string, WeeklyAssignment>();
-        const newWeeklyList: WeeklyAssignment[] = [];
-        let weekRemoved = 0;
-
-        wList.forEach(asg => {
-          const key = `${asg.classId}_${asg.subjectId}_${asg.componentId || 'none'}`;
-          if (!uniqueWeeklyMap.has(key)) {
-            uniqueWeeklyMap.set(key, asg);
-            newWeeklyList.push(asg);
-          } else {
-            weekRemoved++;
-          }
-        });
-
-        if (weekRemoved > 0) {
-          this.state.weeklyAssignments[wId] = newWeeklyList;
-          removedCount += weekRemoved;
-        }
-      }
-    });
-
-    if (removedCount > 0) {
-      this.save();
-    }
-
-    return removedCount;
+    const res = this.sanitizeAndCleanAssignments(weekId);
+    return res.removedCount + res.fixedCount;
   }
 
   public syncSubjectsToMasterAssignments(): number {
