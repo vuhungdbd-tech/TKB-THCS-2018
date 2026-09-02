@@ -30,18 +30,14 @@ interface PeriodUnit {
 export function solveTimetable(
   state: DatabaseState,
   weekId: string,
-  options: SolverOptions = { strategy: 'balanced', maxIterations: 5000 }
+  options: SolverOptions = { strategy: 'balanced', maxIterations: 25000 }
 ): SolverResult {
   const startTime = Date.now();
 
-  // 1. Run Pre-Check
+  // 1. Run Pre-Check (Log issues but do not block generation)
   const preCheck = runPreCheck(state, weekId);
   if (!preCheck.isValid) {
-    return {
-      success: false,
-      issues: preCheck.issues,
-      executionTimeMs: Date.now() - startTime
-    };
+    console.warn('PreCheck warnings/errors encountered, proceeding with robust force-fill generation:', preCheck.issues);
   }
 
   // Active days & slots
@@ -69,12 +65,14 @@ export function solveTimetable(
   const existingVersion = state.timetableVersions[weekId]?.find(v => v.isCurrent);
   const lockedList: LockedSlot[] = state.lockedSlots[weekId] || [];
 
-  // Map of locked slots: key `${classId}_${dayOfWeek}_${period}`
-  const lockedMap = new Map<string, { subjectId: string; componentId?: string; teacherId: string }>();
+  const lockedItems: { classId: string; dayOfWeek: number; period: number; subjectId: string; componentId?: string; teacherId: string }[] = [];
 
   if (existingVersion) {
     existingVersion.entries.filter(e => e.isLocked).forEach(e => {
-      lockedMap.set(`${e.classId}_${e.dayOfWeek}_${e.period}`, {
+      lockedItems.push({
+        classId: e.classId,
+        dayOfWeek: e.dayOfWeek,
+        period: e.period,
         subjectId: e.subjectId,
         componentId: e.componentId,
         teacherId: e.teacherId
@@ -83,11 +81,16 @@ export function solveTimetable(
   }
 
   lockedList.filter(l => l.isLocked).forEach(l => {
-    lockedMap.set(`${l.classId}_${l.dayOfWeek}_${l.period}`, {
-      subjectId: l.subjectId,
-      componentId: l.componentId,
-      teacherId: l.teacherId
-    });
+    if (!lockedItems.some(item => item.classId === l.classId && item.dayOfWeek === l.dayOfWeek && item.period === l.period)) {
+      lockedItems.push({
+        classId: l.classId,
+        dayOfWeek: l.dayOfWeek,
+        period: l.period,
+        subjectId: l.subjectId,
+        componentId: l.componentId,
+        teacherId: l.teacherId
+      });
+    }
   });
 
   // Fetch unavailability & day offs
@@ -135,9 +138,8 @@ export function solveTimetable(
     let countNeeded = asg.periodsPerWeek;
 
     // Check how many are already fulfilled by locked slots
-    lockedMap.forEach((val, key) => {
-      const [cId] = key.split('_');
-      if (cId === asg.classId && val.teacherId === asg.teacherId && val.subjectId === asg.subjectId && val.componentId === asg.componentId) {
+    lockedItems.forEach(val => {
+      if (val.classId === asg.classId && val.teacherId === asg.teacherId && val.subjectId === asg.subjectId && val.componentId === asg.componentId) {
         countNeeded--;
       }
     });
@@ -145,20 +147,17 @@ export function solveTimetable(
     remainingAssignmentCount.set(asg.id, Math.max(0, countNeeded));
   });
 
-  // Create pre-filled entries from locked map
-  lockedMap.forEach((val, key) => {
-    const [classId, dStr, pStr] = key.split('_');
-    const dayOfWeek = parseInt(dStr, 10);
-    const period = parseInt(pStr, 10);
-    const session = period <= state.timeSlotConfig.morningPeriodsCount ? 'morning' : 'afternoon';
+  // Create pre-filled entries from locked items
+  lockedItems.forEach(val => {
+    const session = val.period <= state.timeSlotConfig.morningPeriodsCount ? 'morning' : 'afternoon';
 
     preFilledEntries.push({
-      id: `entry_locked_${classId}_${dayOfWeek}_${period}`,
+      id: `entry_locked_${val.classId}_${val.dayOfWeek}_${val.period}`,
       timetableId: 'current',
       weekId,
-      classId,
-      dayOfWeek,
-      period,
+      classId: val.classId,
+      dayOfWeek: val.dayOfWeek,
+      period: val.period,
       session,
       subjectId: val.subjectId,
       componentId: val.componentId,
@@ -169,6 +168,7 @@ export function solveTimetable(
 
   // Populate unscheduled units
   assignments.forEach(asg => {
+    if (!asg.teacherId || asg.teacherId.trim() === '') return; // Skip unassigned subjects
     const needed = remainingAssignmentCount.get(asg.id) || 0;
     for (let i = 0; i < needed; i++) {
       unitsToSchedule.push({
@@ -208,28 +208,56 @@ export function solveTimetable(
   // Grid occupancy matrices:
   // classGrid[classId][day][period] = unit / entry
   const classOccupancy = new Map<string, Map<string, TimetableEntry>>();
-  // teacherGrid[teacherId][day][period] = unit / entry
-  const teacherOccupancy = new Map<string, Map<string, TimetableEntry>>();
+  // teacherGrid[teacherId][day][period] = TimetableEntry[]
+  const teacherOccupancy = new Map<string, Map<string, TimetableEntry[]>>();
 
   const getSlotKey = (day: number, period: number) => `${day}_${period}`;
+
+  const canTeacherDoubleBook = (teacherId: string, classId: string, subjectId: string, day: number, period: number): boolean => {
+    const slotKey = getSlotKey(day, period);
+    const existingEntries = teacherOccupancy.get(teacherId)?.get(slotKey);
+    if (!existingEntries || existingEntries.length === 0) return true;
+    const tch = state.teachers.find(t => t.id === teacherId);
+    if (!tch?.allowDoubleBooking) return false;
+    if (existingEntries.length >= 2) return false; // Max 2 classes simultaneously
+
+    const newCls = state.classes.find(c => c.id === classId);
+    const existingEntry = existingEntries[0];
+    const existingCls = state.classes.find(c => c.id === existingEntry.classId);
+
+    const isSameGrade = existingCls?.gradeId && newCls?.gradeId && existingCls.gradeId === newCls.gradeId;
+    return !!isSameGrade;
+  };
 
   const setOccupied = (entry: TimetableEntry) => {
     if (!classOccupancy.has(entry.classId)) classOccupancy.set(entry.classId, new Map());
     classOccupancy.get(entry.classId)!.set(getSlotKey(entry.dayOfWeek, entry.period), entry);
 
     if (!teacherOccupancy.has(entry.teacherId)) teacherOccupancy.set(entry.teacherId, new Map());
-    teacherOccupancy.get(entry.teacherId)!.set(getSlotKey(entry.dayOfWeek, entry.period), entry);
+    const tMap = teacherOccupancy.get(entry.teacherId)!;
+    const slotKey = getSlotKey(entry.dayOfWeek, entry.period);
+    if (!tMap.has(slotKey)) tMap.set(slotKey, []);
+    tMap.get(slotKey)!.push(entry);
   };
 
   const clearOccupied = (entry: TimetableEntry) => {
     classOccupancy.get(entry.classId)?.delete(getSlotKey(entry.dayOfWeek, entry.period));
-    teacherOccupancy.get(entry.teacherId)?.delete(getSlotKey(entry.dayOfWeek, entry.period));
+    const tMap = teacherOccupancy.get(entry.teacherId);
+    if (tMap) {
+      const slotKey = getSlotKey(entry.dayOfWeek, entry.period);
+      const list = tMap.get(slotKey);
+      if (list) {
+        const idx = list.findIndex(e => e.id === entry.id || e.classId === entry.classId);
+        if (idx !== -1) list.splice(idx, 1);
+        if (list.length === 0) tMap.delete(slotKey);
+      }
+    }
   };
 
-  const isSlotFree = (classId: string, teacherId: string, day: number, period: number): boolean => {
+  const isSlotFree = (classId: string, teacherId: string, day: number, period: number, subjectId: string): boolean => {
     const slotKey = getSlotKey(day, period);
     if (classOccupancy.get(classId)?.has(slotKey)) return false;
-    if (teacherOccupancy.get(teacherId)?.has(slotKey)) return false;
+    if (!canTeacherDoubleBook(teacherId, classId, subjectId, day, period)) return false;
     if (isSlotHoliday(classId, day, period)) return false;
     if (isTeacherUnavailable(teacherId, day, period)) return false;
     return true;
@@ -243,7 +271,7 @@ export function solveTimetable(
   const unassignedUnits: PeriodUnit[] = [];
 
   let attempts = 0;
-  const maxSearchSteps = options.maxIterations || 5000;
+  const maxSearchSteps = options.maxIterations || 25000;
 
   function backtrack(unitIdx: number): boolean {
     attempts++;
@@ -276,15 +304,27 @@ export function solveTimetable(
         if (classShift === 'morning' && !isMorningPeriod) return;
         if (classShift === 'afternoon' && isMorningPeriod) return;
 
-        if (isSlotFree(unit.classId, unit.teacherId, day, period)) {
+        if (isSlotFree(unit.classId, unit.teacherId, day, period, unit.subjectId)) {
+          // Check same subject count on this day for this class
+          const sameSubjectEntriesOnDay = currentSolution.filter(
+            e => e.classId === unit.classId && e.subjectId === unit.subjectId && e.dayOfWeek === day
+          );
+
+          // STRICT RULE: Max 2 periods of the same subject per day. Disallow 3rd or more (e.g. avoid period 1, 2, 3, 4 same subject).
+          if (sameSubjectEntriesOnDay.length >= 2) return;
+
           // Calculate heuristic score for placing unit here
           let score = 0;
 
-          // Prefer days where subject is not yet present
-          const existingSameSubjectDay = currentSolution.some(
-            e => e.classId === unit.classId && e.subjectId === unit.subjectId && e.dayOfWeek === day
-          );
-          if (existingSameSubjectDay) score += 10; // penalty for clustering same subject in one day
+          if (sameSubjectEntriesOnDay.length === 1) {
+            score += 100; // heavy penalty for having 2 periods of same subject on same day
+
+            // Check if consecutive (period - 1 or period + 1)
+            const isConsecutive = sameSubjectEntriesOnDay.some(e => Math.abs(e.period - period) === 1);
+            if (isConsecutive) {
+              score += 300; // extremely high penalty for consecutive same subject periods
+            }
+          }
 
           // Soft avoid slot penalty
           const isSoftAvoid = avoidSlots.some(ta => ta.teacherId === unit.teacherId && ta.dayOfWeek === day && ta.period === period && ta.level === 'soft');
@@ -376,7 +416,7 @@ export function solveTimetable(
   const totalRequiredPeriods = preCheck.totalRequiredPeriods;
   const success = backtrack(0);
 
-  // If strict backtracking failed to place 100%, force-fill remaining unassigned units into any free slots
+  // If strict backtracking failed to place 100%, force-fill remaining unassigned units respecting max 2 periods per subject per day
   if (currentSolution.length < totalRequiredPeriods) {
     const placedAssignmentCounts = new Map<string, number>();
     currentSolution.forEach(e => {
@@ -392,30 +432,83 @@ export function solveTimetable(
       const missing = a.periodsPerWeek - assigned;
       if (missing > 0) {
         for (let i = 0; i < missing; i++) {
-          // Find any available slot for this class
           let placed = false;
-          for (const day of activeDays) {
-            if (placed) break;
-            for (const period of allPeriods) {
-              if (placed) break;
+          // Find candidate slots across days and periods, scoring them by how few times this subject is already on that day
+          const candidateSlots: { day: number; period: number; score: number }[] = [];
+
+          activeDays.forEach(day => {
+            // Count same subject on this day for this class
+            const sameSubjectCountOnDay = currentSolution.filter(
+              e => e.classId === a.classId && e.subjectId === a.subjectId && e.dayOfWeek === day
+            ).length;
+
+            // STRICT: max 2 periods of same subject per day
+            if (sameSubjectCountOnDay >= 2) return;
+
+            allPeriods.forEach(period => {
               const occupiedByClass = currentSolution.some(e => e.classId === a.classId && e.dayOfWeek === day && e.period === period);
-              const occupiedByTeacher = currentSolution.some(e => e.teacherId === a.teacherId && e.dayOfWeek === day && e.period === period);
-              if (!occupiedByClass && !occupiedByTeacher) {
-                const session = period <= state.timeSlotConfig.morningPeriodsCount ? 'morning' : 'afternoon';
-                currentSolution.push({
-                  id: `entry_force_${a.classId}_${day}_${period}_${Date.now()}_${Math.random().toString(36).substr(2,3)}`,
-                  timetableId: 'current',
-                  weekId,
-                  classId: a.classId,
-                  dayOfWeek: day,
-                  period,
-                  session,
-                  subjectId: a.subjectId,
-                  componentId: a.componentId,
-                  teacherId: a.teacherId,
-                  isLocked: false
-                });
-                placed = true;
+              const teacherCanBook = canTeacherDoubleBook(a.teacherId, a.classId, a.subjectId, day, period);
+              if (!occupiedByClass && teacherCanBook) {
+                // Score: lower is better. Prefer days with 0 same subject over 1.
+                let score = sameSubjectCountOnDay * 100;
+                // Also prefer morning for 2-session or morning shift
+                const cls = state.classes.find(c => c.id === a.classId);
+                const isMorning = period <= state.timeSlotConfig.morningPeriodsCount;
+                if (cls?.shift === 'morning' && !isMorning) return;
+                if (cls?.shift === 'afternoon' && isMorning) return;
+                if (isMorning) score -= 10;
+
+                candidateSlots.push({ day, period, score });
+              }
+            });
+          });
+
+          candidateSlots.sort((s1, s2) => s1.score - s2.score);
+
+          if (candidateSlots.length > 0) {
+            const slot = candidateSlots[0];
+            const session = slot.period <= state.timeSlotConfig.morningPeriodsCount ? 'morning' : 'afternoon';
+            currentSolution.push({
+              id: `entry_force_${a.classId}_${slot.day}_${slot.period}_${Date.now()}_${Math.random().toString(36).substr(2,3)}`,
+              timetableId: 'current',
+              weekId,
+              classId: a.classId,
+              dayOfWeek: slot.day,
+              period: slot.period,
+              session,
+              subjectId: a.subjectId,
+              componentId: a.componentId,
+              teacherId: a.teacherId,
+              isLocked: false
+            });
+            placed = true;
+          }
+
+          // If still not placed because of strict sameSubjectCount < 2 constraint, relax and place in ANY free slot
+          if (!placed) {
+            for (const day of activeDays) {
+              if (placed) break;
+              for (const period of allPeriods) {
+                if (placed) break;
+                const occupiedByClass = currentSolution.some(e => e.classId === a.classId && e.dayOfWeek === day && e.period === period);
+                const teacherCanBook = canTeacherDoubleBook(a.teacherId, a.classId, a.subjectId, day, period);
+                if (!occupiedByClass && teacherCanBook) {
+                  const session = period <= state.timeSlotConfig.morningPeriodsCount ? 'morning' : 'afternoon';
+                  currentSolution.push({
+                    id: `entry_forcerelax_${a.classId}_${day}_${period}_${Date.now()}_${Math.random().toString(36).substr(2,3)}`,
+                    timetableId: 'current',
+                    weekId,
+                    classId: a.classId,
+                    dayOfWeek: day,
+                    period,
+                    session,
+                    subjectId: a.subjectId,
+                    componentId: a.componentId,
+                    teacherId: a.teacherId,
+                    isLocked: false
+                  });
+                  placed = true;
+                }
               }
             }
           }

@@ -44,7 +44,10 @@ export function validateTimetable(
   // Verify Class Collisions
   classSlotMap.forEach((list, key) => {
     if (list.length > 1) {
-      const [classId, dayStr, periodStr] = key.split('_');
+      const sample = list[0];
+      const classId = sample.classId;
+      const dayStr = sample.dayOfWeek;
+      const periodStr = sample.period;
       const cls = state.classes.find(c => c.id === classId);
       issues.push({
         type: 'error',
@@ -54,8 +57,8 @@ export function validateTimetable(
         details: {
           classId,
           className: cls?.name,
-          dayOfWeek: parseInt(dayStr, 10),
-          period: parseInt(periodStr, 10)
+          dayOfWeek: dayStr,
+          period: periodStr
         },
         recommendation: 'Kéo thả một trong hai môn sang khung giờ khác.'
       });
@@ -65,8 +68,23 @@ export function validateTimetable(
   // Verify Teacher Collisions
   teacherSlotMap.forEach((list, key) => {
     if (list.length > 1) {
-      const [teacherId, dayStr, periodStr] = key.split('_');
+      const sample = list[0];
+      const teacherId = sample.teacherId;
+      const dayStr = sample.dayOfWeek;
+      const periodStr = sample.period;
       const tch = state.teachers.find(t => t.id === teacherId);
+
+      const areSameGrade = list.every(e => {
+        const cls = state.classes.find(c => c.id === e.classId);
+        const firstCls = state.classes.find(c => c.id === list[0].classId);
+        return cls?.gradeId && firstCls?.gradeId && cls.gradeId === firstCls.gradeId;
+      });
+
+      if (tch?.allowDoubleBooking && areSameGrade && list.length <= 2) {
+        // Valid double booking for allowed teacher within same grade
+        return;
+      }
+
       const classNames = list.map(e => state.classes.find(c => c.id === e.classId)?.name || e.classId).join(', ');
       issues.push({
         type: 'error',
@@ -76,8 +94,8 @@ export function validateTimetable(
         details: {
           teacherId,
           teacherName: tch?.fullName,
-          dayOfWeek: parseInt(dayStr, 10),
-          period: parseInt(periodStr, 10)
+          dayOfWeek: dayStr,
+          period: periodStr
         },
         recommendation: 'Di chuyển một trong các tiết dạy của giáo viên này.'
       });
@@ -87,7 +105,10 @@ export function validateTimetable(
   // Verify Room Collisions
   roomSlotMap.forEach((list, key) => {
     if (list.length > 1) {
-      const [roomId, dayStr, periodStr] = key.split('_');
+      const sample = list[0];
+      const roomId = sample.roomId;
+      const dayStr = sample.dayOfWeek;
+      const periodStr = sample.period;
       const rm = state.rooms.find(r => r.id === roomId);
       if (rm?.isShared) {
         issues.push({
@@ -95,7 +116,7 @@ export function validateTimetable(
           category: 'hard_constraint',
           code: 'ROOM_COLLISION',
           message: `Phòng học dùng chung ${rm.name} bị trùng ${list.length} lớp tại Thứ ${dayStr}, Tiết ${periodStr}.`,
-          details: { dayOfWeek: parseInt(dayStr, 10), period: parseInt(periodStr, 10) }
+          details: { dayOfWeek: dayStr, period: periodStr }
         });
       }
     }
@@ -217,7 +238,7 @@ export function validateTimetable(
     const matchedAsg = weeklyAssignments.find(a => 
       a.classId === e.classId && 
       a.subjectId === e.subjectId && 
-      (!a.componentId || !e.componentId || a.componentId === e.componentId)
+      (a.componentId || '') === (e.componentId || '')
     );
     if (matchedAsg && matchedAsg.teacherId && matchedAsg.teacherId !== e.teacherId) {
       const assignedTch = state.teachers.find(t => t.id === matchedAsg.teacherId);

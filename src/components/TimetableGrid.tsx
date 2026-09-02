@@ -288,9 +288,17 @@ export const TimetableGrid: React.FC = () => {
                 onChange={(e) => { setSelectedClassId(e.target.value); setSelectedSlot(null); }}
                 className="bg-slate-950 border border-slate-800 text-white text-xs font-bold rounded-lg px-3 py-1.5"
               >
-                {state.classes.map(c => (
-                  <option key={c.id} value={c.id}>{c.name}</option>
-                ))}
+                {state.grades.map(grd => {
+                  const gradeClasses = state.classes.filter(c => c.gradeId === grd.id);
+                  if (gradeClasses.length === 0) return null;
+                  return (
+                    <optgroup key={grd.id} label={grd.name}>
+                      {gradeClasses.map(c => (
+                        <option key={c.id} value={c.id}>{c.name}</option>
+                      ))}
+                    </optgroup>
+                  );
+                })}
               </select>
             </div>
           )}

@@ -282,6 +282,16 @@ export const AssignmentsView: React.FC = () => {
   const handleApplyWeeklyRotation = (applyBoth: boolean = true) => {
     const allWeeks = state.weeks;
     
+    const getQualifiedTeacherId = (subjectId: string, componentId?: string) => {
+      if (componentId) {
+        const tComp = state.teachers.find(t => t.qualifiedSubjectIds?.includes(componentId));
+        if (tComp) return tComp.id;
+      }
+      const tSbj = state.teachers.find(t => t.qualifiedSubjectIds?.includes(subjectId) || t.mainSubjectId === subjectId);
+      if (tSbj) return tSbj.id;
+      return '';
+    };
+
     // 1. Update Master Assignments (Phân công gốc) using odd week configuration as base
     let newMasterList = [...state.masterAssignments];
     state.classes.forEach(c => {
@@ -306,7 +316,7 @@ export const AssignmentsView: React.FC = () => {
               classId: c.id,
               subjectId: 'sbj_khtn',
               componentId: compId,
-              teacherId: state.teachers[0]?.id || '',
+              teacherId: '',
               periodsPerWeek: p
             });
           }
@@ -332,7 +342,7 @@ export const AssignmentsView: React.FC = () => {
               classId: c.id,
               subjectId: 'sbj_khxh',
               componentId: compId,
-              teacherId: state.teachers[0]?.id || '',
+              teacherId: '',
               periodsPerWeek: p
             });
           }
@@ -377,7 +387,7 @@ export const AssignmentsView: React.FC = () => {
               const masterMatch = state.masterAssignments.find(
                 m => m.classId === c.id && m.subjectId === 'sbj_khtn' && m.componentId === compId
               );
-              const teacherId = masterMatch?.teacherId || state.teachers[0]?.id || '';
+              const teacherId = masterMatch?.teacherId || '';
               weekAssignments.push({
                 id: `wasg_rot_${w.id}_${c.id}_${compId}`,
                 weekId: w.id,
@@ -417,7 +427,7 @@ export const AssignmentsView: React.FC = () => {
               const masterMatch = state.masterAssignments.find(
                 m => m.classId === c.id && m.subjectId === 'sbj_khxh' && m.componentId === compId
               );
-              const teacherId = masterMatch?.teacherId || state.teachers[0]?.id || '';
+              const teacherId = masterMatch?.teacherId || '';
               weekAssignments.push({
                 id: `wasg_rot_${w.id}_${c.id}_${compId}`,
                 weekId: w.id,
@@ -1777,11 +1787,13 @@ export const AssignmentsView: React.FC = () => {
                   <button
                     onClick={() => {
                       const count = store.syncTimetableWithAssignments(currentWeek.id);
-                      alert(`Đã đồng bộ thành công cho ${count} tiết TKB môn này!`);
+                      const res = store.scanAndFixTimetable(currentWeek.id);
+                      alert(`Đã đồng bộ thành công cho ${count} tiết môn này và lấp đầy ${res.fixedCount} tiết TKB!`);
+                      setSelectedSubjectDetail(null);
                     }}
                     className="bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold px-3 py-2 rounded-xl transition shadow"
                   >
-                    ⚡ Đồng bộ TKB môn này
+                    ⚡ Đồng bộ & Xếp lại TKB môn này
                   </button>
                   <button
                     onClick={() => setSelectedSubjectDetail(null)}

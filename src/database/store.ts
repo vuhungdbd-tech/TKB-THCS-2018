@@ -386,7 +386,7 @@ class Store {
       const matchedAsg = assignments.find(a => 
         a.classId === entry.classId && 
         a.subjectId === entry.subjectId && 
-        (!a.componentId || !entry.componentId || a.componentId === entry.componentId)
+        (a.componentId || '') === (entry.componentId || '')
       );
 
       if (matchedAsg && matchedAsg.teacherId && matchedAsg.teacherId !== entry.teacherId) {
@@ -419,14 +419,15 @@ class Store {
           sbj.components.forEach(comp => {
             const exists = masterList.find(m => m.classId === cls.id && m.subjectId === sbj.id && m.componentId === comp.id);
             if (!exists) {
-              const teacher = this.state.teachers.find(t => t.qualifiedSubjectIds?.includes(sbj.id) || t.mainSubjectId === sbj.id) || this.state.teachers[0];
+              const teacher = this.state.teachers.find(t => t.qualifiedSubjectIds?.includes(comp.id)) ||
+                              this.state.teachers.find(t => t.qualifiedSubjectIds?.includes(sbj.id) || t.mainSubjectId === sbj.id);
               masterList.push({
                 id: `masg_${Date.now()}_${Math.random().toString(36).substr(2,4)}`,
                 academicYearId: this.state.academicYears[0]?.id || '',
                 classId: cls.id,
                 subjectId: sbj.id,
                 componentId: comp.id,
-                teacherId: teacher?.id || '',
+                teacherId: '',
                 periodsPerWeek: comp.defaultPeriodsPerWeek || 2
               });
               addedCount++;
@@ -435,13 +436,12 @@ class Store {
         } else {
           const exists = masterList.find(m => m.classId === cls.id && m.subjectId === sbj.id && !m.componentId);
           if (!exists) {
-            const teacher = this.state.teachers.find(t => t.qualifiedSubjectIds?.includes(sbj.id) || t.mainSubjectId === sbj.id) || this.state.teachers[0];
             masterList.push({
               id: `masg_${Date.now()}_${Math.random().toString(36).substr(2,4)}`,
               academicYearId: this.state.academicYears[0]?.id || '',
               classId: cls.id,
               subjectId: sbj.id,
-              teacherId: teacher?.id || '',
+              teacherId: '',
               periodsPerWeek: sbj.defaultPeriodsPerWeek || 3
             });
             addedCount++;
@@ -522,6 +522,13 @@ class Store {
       c.shift = 'both';
       c.maxPeriodsPerDay = 9;
     });
+
+    // 0.1 Automatically fix teacher limits
+    const fixedTch = this.autoFixTeacherLimits(weekId);
+    if (fixedTch > 0) {
+      messages.push(`Đã tự động nâng hạn mức tiết tối đa cho ${fixedTch} giáo viên quá tải.`);
+      fixedCount += fixedTch;
+    }
 
     // 1. Sync subjects to master assignments
     const addedMaster = this.syncSubjectsToMasterAssignments();

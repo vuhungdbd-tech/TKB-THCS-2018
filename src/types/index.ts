@@ -102,6 +102,7 @@ export interface Teacher {
   maxSessionsPerDay: number;
   maxDaysPerWeek: number;
   note?: string;
+  allowDoubleBooking?: boolean;
   status: 'active' | 'inactive';
 }
 

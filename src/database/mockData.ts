@@ -273,6 +273,7 @@ export const initialTeachers: Teacher[] = [
     maxPeriodsPerDay: 4,
     maxSessionsPerDay: 2,
     maxDaysPerWeek: 5,
+    allowDoubleBooking: true,
     status: 'active'
   },
   {
@@ -351,6 +352,7 @@ export const initialTeachers: Teacher[] = [
     maxPeriodsPerDay: 5,
     maxSessionsPerDay: 2,
     maxDaysPerWeek: 5,
+    allowDoubleBooking: true,
     status: 'active'
   },
   {
