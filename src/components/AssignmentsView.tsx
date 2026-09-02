@@ -71,25 +71,36 @@ export const AssignmentsView: React.FC = () => {
     componentName?: string;
   } | null>(null);
 
+  const initialRotConfigs = store.getRotationConfigs();
   const [rotationKhtn, setRotationKhtn] = useState<Record<string, {
     odd: { phy: number; chem: number; bio: number };
     even: { phy: number; chem: number; bio: number };
-  }>>({
-    grade_6: { odd: { phy: 2, chem: 0, bio: 2 }, even: { phy: 1, chem: 2, bio: 1 } },
-    grade_7: { odd: { phy: 1, chem: 2, bio: 1 }, even: { phy: 2, chem: 0, bio: 2 } },
-    grade_8: { odd: { phy: 2, chem: 1, bio: 1 }, even: { phy: 1, chem: 2, bio: 1 } },
-    grade_9: { odd: { phy: 1, chem: 1, bio: 2 }, even: { phy: 2, chem: 1, bio: 1 } },
-  });
+  }>>(initialRotConfigs.khtn);
 
   const [rotationKhxh, setRotationKhxh] = useState<Record<string, {
     odd: { hist: number; geo: number };
     even: { hist: number; geo: number };
-  }>>({
-    grade_6: { odd: { hist: 2, geo: 1 }, even: { hist: 1, geo: 2 } },
-    grade_7: { odd: { hist: 1, geo: 2 }, even: { hist: 2, geo: 1 } },
-    grade_8: { odd: { hist: 2, geo: 1 }, even: { hist: 1, geo: 2 } },
-    grade_9: { odd: { hist: 1, geo: 2 }, even: { hist: 2, geo: 1 } },
-  });
+  }>>(initialRotConfigs.khxh);
+
+  const handleUpdateKhtnGrade = (gradeId: string, updater: (prevGrade: { odd: { phy: number; chem: number; bio: number }; even: { phy: number; chem: number; bio: number } }) => { odd: { phy: number; chem: number; bio: number }; even: { phy: number; chem: number; bio: number } }) => {
+    setRotationKhtn(prev => {
+      const current = prev[gradeId] || { odd: { phy: 2, chem: 0, bio: 2 }, even: { phy: 1, chem: 2, bio: 1 } };
+      const updatedGrade = updater(current);
+      const next = { ...prev, [gradeId]: updatedGrade };
+      store.saveRotationConfigs({ khtn: next, khxh: rotationKhxh });
+      return next;
+    });
+  };
+
+  const handleUpdateKhxhGrade = (gradeId: string, updater: (prevGrade: { odd: { hist: number; geo: number }; even: { hist: number; geo: number } }) => { odd: { hist: number; geo: number }; even: { hist: number; geo: number } }) => {
+    setRotationKhxh(prev => {
+      const current = prev[gradeId] || { odd: { hist: 2, geo: 1 }, even: { hist: 1, geo: 2 } };
+      const updatedGrade = updater(current);
+      const next = { ...prev, [gradeId]: updatedGrade };
+      store.saveRotationConfigs({ khtn: rotationKhtn, khxh: next });
+      return next;
+    });
+  };
 
   // Helper sync functions to guarantee immediate persistence, zero data loss & instant TKB synchronization
   const syncMaster = (newList: MasterAssignment[]) => {
@@ -311,173 +322,15 @@ export const AssignmentsView: React.FC = () => {
   };
 
   const handleApplyWeeklyRotation = (applyBoth: boolean = true) => {
-    const allWeeks = state.weeks;
-    
-    const getQualifiedTeacherId = (subjectId: string, componentId?: string) => {
-      if (componentId) {
-        const tComp = state.teachers.find(t => t.qualifiedSubjectIds?.includes(componentId));
-        if (tComp) return tComp.id;
-      }
-      const tSbj = state.teachers.find(t => t.qualifiedSubjectIds?.includes(subjectId) || t.mainSubjectId === subjectId);
-      if (tSbj) return tSbj.id;
-      return '';
-    };
+    store.applyRotationConfigs(
+      { khtn: rotationKhtn, khxh: rotationKhxh },
+      applyBoth || activeRotationTab === 'khtn',
+      applyBoth || activeRotationTab === 'khxh',
+      currentWeek.id
+    );
 
-    // 1. Update Master Assignments (Phân công gốc) using odd week configuration as base
-    let newMasterList = [...state.masterAssignments];
-    state.classes.forEach(c => {
-      const gradeId = c.gradeId;
-      if (applyBoth || activeRotationTab === 'khtn') {
-        const cfg = rotationKhtn[gradeId] || rotationKhtn['grade_6'];
-        const pMap = [
-          { compId: 'cmp_phy', p: cfg.odd.phy },
-          { compId: 'cmp_chem', p: cfg.odd.chem },
-          { compId: 'cmp_bio', p: cfg.odd.bio }
-        ];
-        pMap.forEach(({ compId, p }) => {
-          const mIdx = newMasterList.findIndex(
-            m => m.classId === c.id && m.subjectId === 'sbj_khtn' && m.componentId === compId
-          );
-          if (mIdx >= 0) {
-            newMasterList[mIdx] = { ...newMasterList[mIdx], periodsPerWeek: p };
-          } else if (p > 0) {
-            newMasterList.push({
-              id: `masg_rot_${c.id}_${compId}`,
-              academicYearId: currentWeek.academicYearId,
-              classId: c.id,
-              subjectId: 'sbj_khtn',
-              componentId: compId,
-              teacherId: '',
-              periodsPerWeek: p
-            });
-          }
-        });
-      }
-
-      if (applyBoth || activeRotationTab === 'khxh') {
-        const cfg = rotationKhxh[gradeId] || rotationKhxh['grade_6'];
-        const pMap = [
-          { compId: 'cmp_hist', p: cfg.odd.hist },
-          { compId: 'cmp_geo', p: cfg.odd.geo }
-        ];
-        pMap.forEach(({ compId, p }) => {
-          const mIdx = newMasterList.findIndex(
-            m => m.classId === c.id && m.subjectId === 'sbj_khxh' && m.componentId === compId
-          );
-          if (mIdx >= 0) {
-            newMasterList[mIdx] = { ...newMasterList[mIdx], periodsPerWeek: p };
-          } else if (p > 0) {
-            newMasterList.push({
-              id: `masg_rot_${c.id}_${compId}`,
-              academicYearId: currentWeek.academicYearId,
-              classId: c.id,
-              subjectId: 'sbj_khxh',
-              componentId: compId,
-              teacherId: '',
-              periodsPerWeek: p
-            });
-          }
-        });
-      }
-    });
-    syncMaster(newMasterList);
-
-    // 2. Update Weekly Assignments across all 37 weeks
-    allWeeks.forEach((w, idx) => {
-      const weekNum = w.weekNumber || (idx + 1);
-      const isOdd = weekNum % 2 !== 0;
-
-      let weekAssignments = store.getWeeklyAssignments(w.id);
-
-      state.classes.forEach(c => {
-        const gradeId = c.gradeId;
-        
-        // Process KHTN if applying both or active tab is khtn
-        if (applyBoth || activeRotationTab === 'khtn') {
-          const cfg = rotationKhtn[gradeId] || rotationKhtn['grade_6'];
-          const periods = isOdd ? cfg.odd : cfg.even;
-
-          const compMapping = [
-            { compId: 'cmp_phy', p: periods.phy },
-            { compId: 'cmp_chem', p: periods.chem },
-            { compId: 'cmp_bio', p: periods.bio }
-          ];
-
-          compMapping.forEach(({ compId, p }) => {
-            const idxInWeek = weekAssignments.findIndex(
-              a => a.classId === c.id && a.subjectId === 'sbj_khtn' && a.componentId === compId
-            );
-
-            if (idxInWeek >= 0) {
-              weekAssignments[idxInWeek] = {
-                ...weekAssignments[idxInWeek],
-                periodsPerWeek: p,
-                isCustomized: true
-              };
-            } else if (p > 0) {
-              const masterMatch = state.masterAssignments.find(
-                m => m.classId === c.id && m.subjectId === 'sbj_khtn' && m.componentId === compId
-              );
-              const teacherId = masterMatch?.teacherId || '';
-              weekAssignments.push({
-                id: `wasg_rot_${w.id}_${c.id}_${compId}`,
-                weekId: w.id,
-                classId: c.id,
-                subjectId: 'sbj_khtn',
-                componentId: compId,
-                teacherId,
-                periodsPerWeek: p,
-                isCustomized: true
-              });
-            }
-          });
-        }
-
-        // Process KHXH if applying both or active tab is khxh
-        if (applyBoth || activeRotationTab === 'khxh') {
-          const cfg = rotationKhxh[gradeId] || rotationKhxh['grade_6'];
-          const periods = isOdd ? cfg.odd : cfg.even;
-
-          const compMapping = [
-            { compId: 'cmp_hist', p: periods.hist },
-            { compId: 'cmp_geo', p: periods.geo }
-          ];
-
-          compMapping.forEach(({ compId, p }) => {
-            const idxInWeek = weekAssignments.findIndex(
-              a => a.classId === c.id && a.subjectId === 'sbj_khxh' && a.componentId === compId
-            );
-
-            if (idxInWeek >= 0) {
-              weekAssignments[idxInWeek] = {
-                ...weekAssignments[idxInWeek],
-                periodsPerWeek: p,
-                isCustomized: true
-              };
-            } else if (p > 0) {
-              const masterMatch = state.masterAssignments.find(
-                m => m.classId === c.id && m.subjectId === 'sbj_khxh' && m.componentId === compId
-              );
-              const teacherId = masterMatch?.teacherId || '';
-              weekAssignments.push({
-                id: `wasg_rot_${w.id}_${c.id}_${compId}`,
-                weekId: w.id,
-                classId: c.id,
-                subjectId: 'sbj_khxh',
-                componentId: compId,
-                teacherId,
-                periodsPerWeek: p,
-                isCustomized: true
-              });
-            }
-          });
-        }
-      });
-
-      store.saveWeeklyAssignments(w.id, weekAssignments);
-    });
-
-    setWeeklyList(store.getWeeklyAssignments(currentWeek.id));
+    setMasterList([...state.masterAssignments]);
+    setWeeklyList([...store.getWeeklyAssignments(currentWeek.id)]);
     setShowRotationModal(false);
     setSavedMsg(true);
     setTimeout(() => setSavedMsg(false), 3500);
@@ -743,7 +596,12 @@ export const AssignmentsView: React.FC = () => {
 
           <div className="flex items-center space-x-2 shrink-0">
             <button
-              onClick={() => setShowRotationModal(true)}
+              onClick={() => {
+                const rot = store.getRotationConfigs();
+                setRotationKhtn(rot.khtn);
+                setRotationKhxh(rot.khxh);
+                setShowRotationModal(true);
+              }}
               className="flex items-center space-x-1.5 bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/30 text-xs font-semibold px-3 py-2 rounded-xl transition shadow-sm"
               title="Cấu hình số tiết thay đổi luân phiên theo tuần cho phân môn KHTN & KHXH"
             >
@@ -1659,9 +1517,9 @@ export const AssignmentsView: React.FC = () => {
                                 value={cfg.odd.phy}
                                 onChange={(e) => {
                                   const val = parseFloat(e.target.value) || 0;
-                                  setRotationKhtn(prev => ({
-                                    ...prev,
-                                    [gradeId]: { ...prev[gradeId], odd: { ...prev[gradeId]?.odd, phy: val } }
+                                  handleUpdateKhtnGrade(gradeId, current => ({
+                                    ...current,
+                                    odd: { ...current.odd, phy: val }
                                   }));
                                 }}
                                 className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-center font-bold text-amber-400"
@@ -1674,9 +1532,9 @@ export const AssignmentsView: React.FC = () => {
                                 value={cfg.odd.chem}
                                 onChange={(e) => {
                                   const val = parseFloat(e.target.value) || 0;
-                                  setRotationKhtn(prev => ({
-                                    ...prev,
-                                    [gradeId]: { ...prev[gradeId], odd: { ...prev[gradeId]?.odd, chem: val } }
+                                  handleUpdateKhtnGrade(gradeId, current => ({
+                                    ...current,
+                                    odd: { ...current.odd, chem: val }
                                   }));
                                 }}
                                 className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-center font-bold text-amber-400"
@@ -1689,9 +1547,9 @@ export const AssignmentsView: React.FC = () => {
                                 value={cfg.odd.bio}
                                 onChange={(e) => {
                                   const val = parseFloat(e.target.value) || 0;
-                                  setRotationKhtn(prev => ({
-                                    ...prev,
-                                    [gradeId]: { ...prev[gradeId], odd: { ...prev[gradeId]?.odd, bio: val } }
+                                  handleUpdateKhtnGrade(gradeId, current => ({
+                                    ...current,
+                                    odd: { ...current.odd, bio: val }
                                   }));
                                 }}
                                 className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-center font-bold text-amber-400"
@@ -1717,9 +1575,9 @@ export const AssignmentsView: React.FC = () => {
                                 value={cfg.even.phy}
                                 onChange={(e) => {
                                   const val = parseFloat(e.target.value) || 0;
-                                  setRotationKhtn(prev => ({
-                                    ...prev,
-                                    [gradeId]: { ...prev[gradeId], even: { ...prev[gradeId]?.even, phy: val } }
+                                  handleUpdateKhtnGrade(gradeId, current => ({
+                                    ...current,
+                                    even: { ...current.even, phy: val }
                                   }));
                                 }}
                                 className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-center font-bold text-emerald-400"
@@ -1732,9 +1590,9 @@ export const AssignmentsView: React.FC = () => {
                                 value={cfg.even.chem}
                                 onChange={(e) => {
                                   const val = parseFloat(e.target.value) || 0;
-                                  setRotationKhtn(prev => ({
-                                    ...prev,
-                                    [gradeId]: { ...prev[gradeId], even: { ...prev[gradeId]?.even, chem: val } }
+                                  handleUpdateKhtnGrade(gradeId, current => ({
+                                    ...current,
+                                    even: { ...current.even, chem: val }
                                   }));
                                 }}
                                 className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-center font-bold text-emerald-400"
@@ -1747,9 +1605,9 @@ export const AssignmentsView: React.FC = () => {
                                 value={cfg.even.bio}
                                 onChange={(e) => {
                                   const val = parseFloat(e.target.value) || 0;
-                                  setRotationKhtn(prev => ({
-                                    ...prev,
-                                    [gradeId]: { ...prev[gradeId], even: { ...prev[gradeId]?.even, bio: val } }
+                                  handleUpdateKhtnGrade(gradeId, current => ({
+                                    ...current,
+                                    even: { ...current.even, bio: val }
                                   }));
                                 }}
                                 className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-center font-bold text-emerald-400"
@@ -1795,9 +1653,9 @@ export const AssignmentsView: React.FC = () => {
                                 value={cfg.odd.hist}
                                 onChange={(e) => {
                                   const val = parseFloat(e.target.value) || 0;
-                                  setRotationKhxh(prev => ({
-                                    ...prev,
-                                    [gradeId]: { ...prev[gradeId], odd: { ...prev[gradeId]?.odd, hist: val } }
+                                  handleUpdateKhxhGrade(gradeId, current => ({
+                                    ...current,
+                                    odd: { ...current.odd, hist: val }
                                   }));
                                 }}
                                 className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-center font-bold text-amber-400"
@@ -1810,9 +1668,9 @@ export const AssignmentsView: React.FC = () => {
                                 value={cfg.odd.geo}
                                 onChange={(e) => {
                                   const val = parseFloat(e.target.value) || 0;
-                                  setRotationKhxh(prev => ({
-                                    ...prev,
-                                    [gradeId]: { ...prev[gradeId], odd: { ...prev[gradeId]?.odd, geo: val } }
+                                  handleUpdateKhxhGrade(gradeId, current => ({
+                                    ...current,
+                                    odd: { ...current.odd, geo: val }
                                   }));
                                 }}
                                 className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-center font-bold text-amber-400"
@@ -1838,9 +1696,9 @@ export const AssignmentsView: React.FC = () => {
                                 value={cfg.even.hist}
                                 onChange={(e) => {
                                   const val = parseFloat(e.target.value) || 0;
-                                  setRotationKhxh(prev => ({
-                                    ...prev,
-                                    [gradeId]: { ...prev[gradeId], even: { ...prev[gradeId]?.even, hist: val } }
+                                  handleUpdateKhxhGrade(gradeId, current => ({
+                                    ...current,
+                                    even: { ...current.even, hist: val }
                                   }));
                                 }}
                                 className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-center font-bold text-emerald-400"
@@ -1853,9 +1711,9 @@ export const AssignmentsView: React.FC = () => {
                                 value={cfg.even.geo}
                                 onChange={(e) => {
                                   const val = parseFloat(e.target.value) || 0;
-                                  setRotationKhxh(prev => ({
-                                    ...prev,
-                                    [gradeId]: { ...prev[gradeId], even: { ...prev[gradeId]?.even, geo: val } }
+                                  handleUpdateKhxhGrade(gradeId, current => ({
+                                    ...current,
+                                    even: { ...current.even, geo: val }
                                   }));
                                 }}
                                 className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-center font-bold text-emerald-400"

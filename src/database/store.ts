@@ -19,7 +19,10 @@ import {
   TimetableVersion,
   TimetableEntry,
   AuditLog,
-  FixedPeriodRule
+  FixedPeriodRule,
+  RotationConfigs,
+  RotationGradeKhtn,
+  RotationGradeKhxh
 } from '../types';
 
 import {
@@ -47,6 +50,21 @@ import { solveTimetable } from '../scheduler/solver';
 
 const STORAGE_KEY = 'tkb_thcs_2018_db_v1';
 
+export const initialRotationConfigs: RotationConfigs = {
+  khtn: {
+    grade_6: { odd: { phy: 2, chem: 0, bio: 2 }, even: { phy: 1, chem: 2, bio: 1 } },
+    grade_7: { odd: { phy: 1, chem: 2, bio: 1 }, even: { phy: 2, chem: 0, bio: 2 } },
+    grade_8: { odd: { phy: 2, chem: 1, bio: 1 }, even: { phy: 1, chem: 2, bio: 1 } },
+    grade_9: { odd: { phy: 1, chem: 1, bio: 2 }, even: { phy: 2, chem: 1, bio: 1 } },
+  },
+  khxh: {
+    grade_6: { odd: { hist: 2, geo: 1 }, even: { hist: 1, geo: 2 } },
+    grade_7: { odd: { hist: 1, geo: 2 }, even: { hist: 2, geo: 1 } },
+    grade_8: { odd: { hist: 2, geo: 1 }, even: { hist: 1, geo: 2 } },
+    grade_9: { odd: { hist: 1, geo: 2 }, even: { hist: 2, geo: 1 } },
+  }
+};
+
 export interface DatabaseState {
   academicYears: AcademicYear[];
   weeks: Week[];
@@ -60,6 +78,7 @@ export interface DatabaseState {
   departments?: Department[];
   masterAssignments: MasterAssignment[];
   weeklyAssignments: Record<string, WeeklyAssignment[]>; // key: weekId
+  rotationConfigs?: RotationConfigs;
   dayOffs: DayOff[];
   teacherUnavailabilities: TeacherUnavailability[];
   teacherAvoidSlots: TeacherAvoidSlot[];
@@ -135,6 +154,7 @@ class Store {
           departments: parsed.departments || initialDepartments,
           masterAssignments: parsed.masterAssignments || initialMasterAssignments,
           weeklyAssignments: parsed.weeklyAssignments || {},
+          rotationConfigs: parsed.rotationConfigs || JSON.parse(JSON.stringify(initialRotationConfigs)),
           dayOffs: parsed.dayOffs || initialDayOffs,
           teacherUnavailabilities: parsed.teacherUnavailabilities || initialTeacherUnavailabilities,
           teacherAvoidSlots: parsed.teacherAvoidSlots || initialTeacherAvoidSlots,
@@ -866,6 +886,242 @@ class Store {
     this.addAuditLog('Tự động sửa giới hạn tiết GV', `Đã nâng hạn mức max tiết cho ${fixedCount} giáo viên bị quá tải.`);
     this.save();
     return fixedCount;
+  }
+
+  public getRotationConfigs(): RotationConfigs {
+    if (!this.state.rotationConfigs) {
+      this.state.rotationConfigs = JSON.parse(JSON.stringify(initialRotationConfigs));
+    }
+    const grades = this.state.grades;
+    grades.forEach(g => {
+      const gId = g.id;
+      if (!this.state.rotationConfigs!.khtn[gId]) {
+        const code = g.code;
+        const fallbackKey = `grade_${code}`;
+        this.state.rotationConfigs!.khtn[gId] = this.state.rotationConfigs!.khtn[fallbackKey] || {
+          odd: { phy: 2, chem: 0, bio: 2 },
+          even: { phy: 1, chem: 2, bio: 1 }
+        };
+      }
+      if (!this.state.rotationConfigs!.khxh[gId]) {
+        const code = g.code;
+        const fallbackKey = `grade_${code}`;
+        this.state.rotationConfigs!.khxh[gId] = this.state.rotationConfigs!.khxh[fallbackKey] || {
+          odd: { hist: 2, geo: 1 },
+          even: { hist: 1, geo: 2 }
+        };
+      }
+    });
+    return this.state.rotationConfigs;
+  }
+
+  public saveRotationConfigs(configs: RotationConfigs) {
+    this.state.rotationConfigs = JSON.parse(JSON.stringify(configs));
+    this.save();
+  }
+
+  public applyRotationConfigs(
+    configs: RotationConfigs,
+    applyKhtn: boolean = true,
+    applyKhxh: boolean = true,
+    currentWeekId?: string
+  ) {
+    this.saveRotationConfigs(configs);
+
+    const khtnSubject = this.state.subjects.find(s => 
+      s.code === 'KHTN' || s.id === 'sbj_khtn' || s.name.toLowerCase().includes('khoa học tự nhiên')
+    );
+    const khxhSubject = this.state.subjects.find(s => 
+      s.code === 'KHXH' || s.id === 'sbj_khxh' || s.name.toLowerCase().includes('lịch sử và địa') || s.name.toLowerCase().includes('lịch sử & địa') || s.name.toLowerCase().includes('khxh')
+    );
+
+    const khtnComps = khtnSubject?.components || [];
+    const phyComp = khtnComps.find(c => c.code === 'VAT_LI' || c.id === 'cmp_phy' || c.name.toLowerCase().includes('vật lí') || c.name.toLowerCase().includes('vật lý') || c.name.toLowerCase().includes('lí') || c.name.toLowerCase().includes('lý'));
+    const chemComp = khtnComps.find(c => c.code === 'HOA_HOC' || c.id === 'cmp_chem' || c.name.toLowerCase().includes('hóa'));
+    const bioComp = khtnComps.find(c => c.code === 'SINH_HOC' || c.id === 'cmp_bio' || c.name.toLowerCase().includes('sinh'));
+
+    const khxhComps = khxhSubject?.components || [];
+    const histComp = khxhComps.find(c => c.code === 'LICH_SU' || c.id === 'cmp_hist' || c.name.toLowerCase().includes('sử'));
+    const geoComp = khxhComps.find(c => c.code === 'DIA_LI' || c.id === 'cmp_geo' || c.name.toLowerCase().includes('địa'));
+
+    const getGradeConfig = (gradeId: string, type: 'khtn' | 'khxh') => {
+      const grade = this.state.grades.find(g => g.id === gradeId);
+      const conf = configs[type] || {};
+      if (conf[gradeId]) return conf[gradeId];
+      if (grade && conf[`grade_${grade.code}`]) return conf[`grade_${grade.code}`];
+      if (grade && conf[grade.code]) return conf[grade.code];
+      return conf['grade_6'] || (type === 'khtn' 
+        ? { odd: { phy: 2, chem: 0, bio: 2 }, even: { phy: 1, chem: 2, bio: 1 } }
+        : { odd: { hist: 2, geo: 1 }, even: { hist: 1, geo: 2 } });
+    };
+
+    // 1. Update Master Assignments
+    const currentAcademicYearId = this.state.academicYears[0]?.id || 'ay_2026_2027';
+    let newMasterList = [...this.state.masterAssignments];
+
+    this.state.classes.forEach(c => {
+      const gradeId = c.gradeId;
+      if (applyKhtn && khtnSubject) {
+        const cfg = getGradeConfig(gradeId, 'khtn') as RotationGradeKhtn;
+        const pMap = [
+          { comp: phyComp, p: cfg.odd.phy },
+          { comp: chemComp, p: cfg.odd.chem },
+          { comp: bioComp, p: cfg.odd.bio }
+        ];
+
+        pMap.forEach(({ comp, p }) => {
+          if (!comp) return;
+          const mIdx = newMasterList.findIndex(
+            m => m.classId === c.id && m.subjectId === khtnSubject.id && (m.componentId === comp.id || m.componentId === comp.code)
+          );
+          if (mIdx >= 0) {
+            newMasterList[mIdx] = { ...newMasterList[mIdx], periodsPerWeek: p };
+          } else if (p > 0) {
+            newMasterList.push({
+              id: `masg_rot_${c.id}_${comp.id}`,
+              academicYearId: currentAcademicYearId,
+              classId: c.id,
+              subjectId: khtnSubject.id,
+              componentId: comp.id,
+              teacherId: '',
+              periodsPerWeek: p
+            });
+          }
+        });
+      }
+
+      if (applyKhxh && khxhSubject) {
+        const cfg = getGradeConfig(gradeId, 'khxh') as RotationGradeKhxh;
+        const pMap = [
+          { comp: histComp, p: cfg.odd.hist },
+          { comp: geoComp, p: cfg.odd.geo }
+        ];
+
+        pMap.forEach(({ comp, p }) => {
+          if (!comp) return;
+          const mIdx = newMasterList.findIndex(
+            m => m.classId === c.id && m.subjectId === khxhSubject.id && (m.componentId === comp.id || m.componentId === comp.code)
+          );
+          if (mIdx >= 0) {
+            newMasterList[mIdx] = { ...newMasterList[mIdx], periodsPerWeek: p };
+          } else if (p > 0) {
+            newMasterList.push({
+              id: `masg_rot_${c.id}_${comp.id}`,
+              academicYearId: currentAcademicYearId,
+              classId: c.id,
+              subjectId: khxhSubject.id,
+              componentId: comp.id,
+              teacherId: '',
+              periodsPerWeek: p
+            });
+          }
+        });
+      }
+    });
+
+    this.state.masterAssignments = newMasterList;
+
+    // 2. Update Weekly Assignments for ALL 37 weeks
+    this.state.weeks.forEach((w, idx) => {
+      const weekNum = w.weekNumber || (idx + 1);
+      const isOdd = weekNum % 2 !== 0;
+
+      let weekAssignments = this.getWeeklyAssignments(w.id);
+
+      this.state.classes.forEach(c => {
+        const gradeId = c.gradeId;
+
+        if (applyKhtn && khtnSubject) {
+          const cfg = getGradeConfig(gradeId, 'khtn') as RotationGradeKhtn;
+          const periods = isOdd ? cfg.odd : cfg.even;
+
+          const compMapping = [
+            { comp: phyComp, p: periods.phy },
+            { comp: chemComp, p: periods.chem },
+            { comp: bioComp, p: periods.bio }
+          ];
+
+          compMapping.forEach(({ comp, p }) => {
+            if (!comp) return;
+            const idxInWeek = weekAssignments.findIndex(
+              a => a.classId === c.id && a.subjectId === khtnSubject.id && (a.componentId === comp.id || a.componentId === comp.code)
+            );
+
+            if (idxInWeek >= 0) {
+              weekAssignments[idxInWeek] = {
+                ...weekAssignments[idxInWeek],
+                periodsPerWeek: p,
+                isCustomized: true
+              };
+            } else if (p > 0) {
+              const masterMatch = this.state.masterAssignments.find(
+                m => m.classId === c.id && m.subjectId === khtnSubject.id && (m.componentId === comp.id || m.componentId === comp.code)
+              );
+              weekAssignments.push({
+                id: `wasg_rot_${w.id}_${c.id}_${comp.id}`,
+                weekId: w.id,
+                classId: c.id,
+                subjectId: khtnSubject.id,
+                componentId: comp.id,
+                teacherId: masterMatch?.teacherId || '',
+                periodsPerWeek: p,
+                isCustomized: true
+              });
+            }
+          });
+        }
+
+        if (applyKhxh && khxhSubject) {
+          const cfg = getGradeConfig(gradeId, 'khxh') as RotationGradeKhxh;
+          const periods = isOdd ? cfg.odd : cfg.even;
+
+          const compMapping = [
+            { comp: histComp, p: periods.hist },
+            { comp: geoComp, p: periods.geo }
+          ];
+
+          compMapping.forEach(({ comp, p }) => {
+            if (!comp) return;
+            const idxInWeek = weekAssignments.findIndex(
+              a => a.classId === c.id && a.subjectId === khxhSubject.id && (a.componentId === comp.id || a.componentId === comp.code)
+            );
+
+            if (idxInWeek >= 0) {
+              weekAssignments[idxInWeek] = {
+                ...weekAssignments[idxInWeek],
+                periodsPerWeek: p,
+                isCustomized: true
+              };
+            } else if (p > 0) {
+              const masterMatch = this.state.masterAssignments.find(
+                m => m.classId === c.id && m.subjectId === khxhSubject.id && (m.componentId === comp.id || m.componentId === comp.code)
+              );
+              weekAssignments.push({
+                id: `wasg_rot_${w.id}_${c.id}_${comp.id}`,
+                weekId: w.id,
+                classId: c.id,
+                subjectId: khxhSubject.id,
+                componentId: comp.id,
+                teacherId: masterMatch?.teacherId || '',
+                periodsPerWeek: p,
+                isCustomized: true
+              });
+            }
+          });
+        }
+      });
+
+      this.saveWeeklyAssignments(w.id, weekAssignments);
+    });
+
+    this.addAuditLog(
+      'Luân phiên tiết KHTN & KHXH',
+      `Đã cấu hình và áp dụng số tiết luân phiên KHTN & KHXH qua tất cả các tuần học và khối lớp.`
+    );
+    this.save();
+    if (currentWeekId) {
+      this.syncTimetableWithAssignments(currentWeekId);
+    }
   }
 }
 

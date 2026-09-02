@@ -306,6 +306,21 @@ export interface AuditLog {
   details: string;
 }
 
+export interface RotationGradeKhtn {
+  odd: { phy: number; chem: number; bio: number };
+  even: { phy: number; chem: number; bio: number };
+}
+
+export interface RotationGradeKhxh {
+  odd: { hist: number; geo: number };
+  even: { hist: number; geo: number };
+}
+
+export interface RotationConfigs {
+  khtn: Record<string, RotationGradeKhtn>;
+  khxh: Record<string, RotationGradeKhxh>;
+}
+
 export interface SchoolState {
   academicYears: AcademicYear[];
   weeks: Week[];
@@ -319,6 +334,7 @@ export interface SchoolState {
   rooms: Room[];
   masterAssignments: MasterAssignment[];
   weeklyAssignments: Record<string, WeeklyAssignment[]>;
+  rotationConfigs?: RotationConfigs;
   dayOffs: DayOff[];
   teacherUnavailabilities: TeacherUnavailability[];
   teacherAvoidSlots: TeacherAvoidSlot[];
