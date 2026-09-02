@@ -71,35 +71,30 @@ export const AssignmentsView: React.FC = () => {
     componentName?: string;
   } | null>(null);
 
-  const initialRotConfigs = store.getRotationConfigs();
   const [rotationKhtn, setRotationKhtn] = useState<Record<string, {
     odd: { phy: number; chem: number; bio: number };
     even: { phy: number; chem: number; bio: number };
-  }>>(initialRotConfigs.khtn);
+  }>>(() => store.getRotationConfigs().khtn);
 
   const [rotationKhxh, setRotationKhxh] = useState<Record<string, {
     odd: { hist: number; geo: number };
     even: { hist: number; geo: number };
-  }>>(initialRotConfigs.khxh);
+  }>>(() => store.getRotationConfigs().khxh);
 
   const handleUpdateKhtnGrade = (gradeId: string, updater: (prevGrade: { odd: { phy: number; chem: number; bio: number }; even: { phy: number; chem: number; bio: number } }) => { odd: { phy: number; chem: number; bio: number }; even: { phy: number; chem: number; bio: number } }) => {
-    setRotationKhtn(prev => {
-      const current = prev[gradeId] || { odd: { phy: 2, chem: 0, bio: 2 }, even: { phy: 1, chem: 2, bio: 1 } };
-      const updatedGrade = updater(current);
-      const next = { ...prev, [gradeId]: updatedGrade };
-      store.saveRotationConfigs({ khtn: next, khxh: rotationKhxh });
-      return next;
-    });
+    const current = rotationKhtn[gradeId] || { odd: { phy: 2, chem: 0, bio: 2 }, even: { phy: 1, chem: 2, bio: 1 } };
+    const updatedGrade = updater(current);
+    const next = { ...rotationKhtn, [gradeId]: updatedGrade };
+    setRotationKhtn(next);
+    store.saveRotationConfigs({ khtn: next, khxh: rotationKhxh }, false);
   };
 
   const handleUpdateKhxhGrade = (gradeId: string, updater: (prevGrade: { odd: { hist: number; geo: number }; even: { hist: number; geo: number } }) => { odd: { hist: number; geo: number }; even: { hist: number; geo: number } }) => {
-    setRotationKhxh(prev => {
-      const current = prev[gradeId] || { odd: { hist: 2, geo: 1 }, even: { hist: 1, geo: 2 } };
-      const updatedGrade = updater(current);
-      const next = { ...prev, [gradeId]: updatedGrade };
-      store.saveRotationConfigs({ khtn: rotationKhtn, khxh: next });
-      return next;
-    });
+    const current = rotationKhxh[gradeId] || { odd: { hist: 2, geo: 1 }, even: { hist: 1, geo: 2 } };
+    const updatedGrade = updater(current);
+    const next = { ...rotationKhxh, [gradeId]: updatedGrade };
+    setRotationKhxh(next);
+    store.saveRotationConfigs({ khtn: rotationKhtn, khxh: next }, false);
   };
 
   // Helper sync functions to guarantee immediate persistence, zero data loss & instant TKB synchronization

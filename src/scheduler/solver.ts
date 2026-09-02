@@ -345,6 +345,22 @@ export function solveTimetable(
           // Prefer morning slots for core subjects if class is 2-session
           if (classShift === 'both' && isMorningPeriod) score -= 2;
 
+          // Same-Grade Parallel Scheduling Heuristic (Xếp trùng tiết cùng Khối khi học cả sáng & chiều):
+          if (options.allowSameGradeParallel !== false) {
+            const unitGradeId = cls?.gradeId;
+            if (unitGradeId) {
+              const sameGradeParallelEntries = currentSolution.filter(e => {
+                if (e.classId === unit.classId) return false;
+                const otherCls = state.classes.find(c => c.id === e.classId);
+                return otherCls?.gradeId === unitGradeId && e.dayOfWeek === day && e.period === period && e.subjectId === unit.subjectId;
+              });
+              if (sameGradeParallelEntries.length > 0) {
+                // Strong reward for synchronizing / aligning same-grade classes at the same period (trùng tiết cùng khối)
+                score -= 30 * sameGradeParallelEntries.length;
+              }
+            }
+          }
+
           // Grade Staggering & Clustering Heuristic (Tối ưu So le giữa các Khối & Dồn/Gộp tiết cùng Khối):
           if (options.optimizeGradeStaggering !== false) {
             const unitGradeId = cls?.gradeId;
@@ -465,6 +481,9 @@ export function solveTimetable(
               e => e.classId === a.classId && e.teacherId === a.teacherId && e.dayOfWeek === day
             );
 
+            const cls = state.classes.find(c => c.id === a.classId);
+            const unitGradeId = cls?.gradeId;
+
             allPeriods.forEach(period => {
               const occupiedByClass = currentSolution.some(e => e.classId === a.classId && e.dayOfWeek === day && e.period === period);
               const teacherIsBusy = a.teacherId ? currentSolution.some(e => e.teacherId === a.teacherId && e.dayOfWeek === day && e.period === period) : false;
@@ -473,12 +492,29 @@ export function solveTimetable(
               if (!occupiedByClass && !teacherIsBusy && !isConsecutive) {
                 // Score: lower is better. Prefer days with 0 same subject over 1.
                 let score = sameSubjectCountOnDay * 100;
-                // Also prefer morning for 2-session or morning shift
-                const cls = state.classes.find(c => c.id === a.classId);
+
+                // Priority for Same-Grade Parallel Slots (Sắp xếp trùng tiết cùng khối)
+                if (unitGradeId && options.allowSameGradeParallel !== false) {
+                  const sameGradeParallelCount = currentSolution.filter(e => {
+                    if (e.classId === a.classId) return false;
+                    const otherCls = state.classes.find(c => c.id === e.classId);
+                    return otherCls?.gradeId === unitGradeId && e.dayOfWeek === day && e.period === period && e.subjectId === a.subjectId;
+                  }).length;
+                  if (sameGradeParallelCount > 0) {
+                    score -= 60 * sameGradeParallelCount; // Highly favor synchronizing same-grade classes
+                  }
+                }
+
+                // Also prefer morning for 2-session or morning shift if slots are available
                 const isMorning = period <= state.timeSlotConfig.morningPeriodsCount;
-                if (cls?.shift === 'morning' && !isMorning) return;
-                if (cls?.shift === 'afternoon' && isMorning) return;
-                if (isMorning) score -= 10;
+                if (cls?.shift === 'morning' && !isMorning) {
+                  // If single-shift morning is full or hard, allow afternoon with modest penalty instead of failing
+                  score += 20;
+                } else if (cls?.shift === 'afternoon' && isMorning) {
+                  score += 20;
+                } else if (isMorning) {
+                  score -= 10;
+                }
 
                 candidateSlots.push({ day, period, score });
               }
@@ -508,40 +544,63 @@ export function solveTimetable(
             placed = true;
           }
 
-          // If still not placed because of strict daily limit constraint, relax limit but STRICTLY enforce non-consecutive so le AND zero teacher collision
+          // If still not placed because of strict daily limit constraint, relax limit across Morning & Afternoon (cả sáng và chiều)
+          // while STRICTLY enforcing non-consecutive so le AND zero teacher collision
           if (!placed) {
+            const cls = state.classes.find(c => c.id === a.classId);
+            const unitGradeId = cls?.gradeId;
+
+            // Candidate slots for relaxed pass with same-grade parallel preference
+            const relaxedCandidateSlots: { day: number; period: number; score: number }[] = [];
+
             for (const day of activeDays) {
-              if (placed) break;
               const sameTeacherClassEntriesOnDay = currentSolution.filter(
                 e => e.classId === a.classId && e.teacherId === a.teacherId && e.dayOfWeek === day
               );
 
               for (const period of allPeriods) {
-                if (placed) break;
                 const occupiedByClass = currentSolution.some(e => e.classId === a.classId && e.dayOfWeek === day && e.period === period);
                 const teacherIsBusy = a.teacherId ? currentSolution.some(e => e.teacherId === a.teacherId && e.dayOfWeek === day && e.period === period) : false;
                 const isConsecutive = sameTeacherClassEntriesOnDay.some(e => Math.abs(e.period - period) === 1);
 
                 if (!occupiedByClass && !teacherIsBusy && !isConsecutive) {
-                  const session = period <= state.timeSlotConfig.morningPeriodsCount ? 'morning' : 'afternoon';
-                  const newEntry: TimetableEntry = {
-                    id: `entry_forcerelax_${a.classId}_${day}_${period}_${Date.now()}_${Math.random().toString(36).substr(2,3)}`,
-                    timetableId: 'current',
-                    weekId,
-                    classId: a.classId,
-                    dayOfWeek: day,
-                    period,
-                    session,
-                    subjectId: a.subjectId,
-                    componentId: a.componentId,
-                    teacherId: a.teacherId,
-                    isLocked: false
-                  };
-                  currentSolution.push(newEntry);
-                  setOccupied(newEntry);
-                  placed = true;
+                  let score = 0;
+                  // Same-grade parallel alignment preference in relaxed pass
+                  if (unitGradeId && options.allowSameGradeParallel !== false) {
+                    const isSameGradeParallel = currentSolution.some(e => {
+                      if (e.classId === a.classId) return false;
+                      const otherCls = state.classes.find(c => c.id === e.classId);
+                      return otherCls?.gradeId === unitGradeId && e.dayOfWeek === day && e.period === period && e.subjectId === a.subjectId;
+                    });
+                    if (isSameGradeParallel) score -= 50;
+                  }
+
+                  relaxedCandidateSlots.push({ day, period, score });
                 }
               }
+            }
+
+            relaxedCandidateSlots.sort((s1, s2) => s1.score - s2.score);
+
+            if (relaxedCandidateSlots.length > 0) {
+              const chosen = relaxedCandidateSlots[0];
+              const session = chosen.period <= state.timeSlotConfig.morningPeriodsCount ? 'morning' : 'afternoon';
+              const newEntry: TimetableEntry = {
+                id: `entry_forcerelax_${a.classId}_${chosen.day}_${chosen.period}_${Date.now()}_${Math.random().toString(36).substr(2,3)}`,
+                timetableId: 'current',
+                weekId,
+                classId: a.classId,
+                dayOfWeek: chosen.day,
+                period: chosen.period,
+                session,
+                subjectId: a.subjectId,
+                componentId: a.componentId,
+                teacherId: a.teacherId,
+                isLocked: false
+              };
+              currentSolution.push(newEntry);
+              setOccupied(newEntry);
+              placed = true;
             }
           }
         }

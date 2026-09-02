@@ -704,11 +704,11 @@ export const ConstraintsView: React.FC = () => {
               </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs pt-2">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 text-xs pt-2">
               <div className="bg-slate-950/60 p-4 rounded-xl border border-indigo-500/20 space-y-2">
                 <div className="flex items-center space-x-2 text-indigo-300 font-bold">
                   <Check className="w-4 h-4 text-emerald-400" />
-                  <span>1. Phân bổ rải đều các ngày (Không trùng tiết)</span>
+                  <span>1. Phân bổ rải đều các ngày</span>
                 </div>
                 <p className="text-slate-300 leading-relaxed">
                   Các môn học được phân bổ <strong className="text-white">mỗi ngày tối đa 1 tiết</strong>, trừ các môn vượt quá số ngày trong tuần (như <strong className="text-indigo-300">Tiếng Anh</strong> có số tiết cao được phép bố trí nhiều hơn 1 tiết/ngày).
@@ -718,20 +718,30 @@ export const ConstraintsView: React.FC = () => {
               <div className="bg-slate-950/60 p-4 rounded-xl border border-indigo-500/20 space-y-2">
                 <div className="flex items-center space-x-2 text-indigo-300 font-bold">
                   <Check className="w-4 h-4 text-emerald-400" />
-                  <span>2. Bố trí Dạy So Le (Không 2 tiết liền nhau)</span>
+                  <span>2. Bố trí Dạy So Le</span>
                 </div>
                 <p className="text-slate-300 leading-relaxed">
-                  Tuyệt đối <strong className="text-rose-300">không bố trí 2 tiết liền nhau của một giáo viên dạy cùng một lớp</strong> trong ngày (VD: Không xếp Tiết 1 & 2; phải xếp so le cách tiết như Tiết 1 & 3, Tiết 2 & 4 hoặc Sáng - Chiều).
+                  Tuyệt đối <strong className="text-rose-300">không bố trí 2 tiết liền nhau của một giáo viên dạy cùng một lớp</strong> trong ngày (phải xếp so le cách tiết như Tiết 1 & 3, Tiết 2 & 4 hoặc Sáng - Chiều).
                 </p>
               </div>
 
               <div className="bg-slate-950/60 p-4 rounded-xl border border-indigo-500/20 space-y-2">
                 <div className="flex items-center space-x-2 text-indigo-300 font-bold">
                   <Check className="w-4 h-4 text-emerald-400" />
-                  <span>3. Tuyệt đối không trùng tiết Giáo viên</span>
+                  <span>3. Chống trùng tiết GV</span>
                 </div>
                 <p className="text-slate-300 leading-relaxed">
-                  Một giáo viên <strong className="text-rose-300">không thể cùng lúc dạy 2 lớp tại cùng một tiết</strong> (VD: Thầy Huấn dạy Toán không thể vừa dạy Tiết 1 lớp 8C8 vừa dạy Tiết 1 lớp 8C9). Hệ thống khóa cứng 100% chống trùng lịch cả trong cùng khối lẫn khác khối.
+                  Một giáo viên <strong className="text-rose-300">không thể cùng lúc dạy 2 lớp tại cùng một tiết</strong> (VD: Thầy Huấn không thể vừa dạy Tiết 1 lớp 8C8 vừa dạy Tiết 1 lớp 8C9). Khóa cứng 100% chống trùng lịch.
+                </p>
+              </div>
+
+              <div className="bg-slate-950/60 p-4 rounded-xl border border-amber-500/30 space-y-2 bg-amber-950/10">
+                <div className="flex items-center space-x-2 text-amber-300 font-bold">
+                  <Sparkles className="w-4 h-4 text-amber-400" />
+                  <span>4. Trùng tiết Cùng Khối (Sáng & Chiều)</span>
+                </div>
+                <p className="text-slate-300 leading-relaxed">
+                  Các môn <strong className="text-amber-300">không thể xếp hết trong một buổi hoặc có số tiết cao</strong> sẽ tự động mở rộng sang cả sáng & chiều và <strong className="text-white">sắp xếp trùng tiết của cùng một khối</strong> (song song các lớp cùng khối với GV tương ứng).
                 </p>
               </div>
             </div>

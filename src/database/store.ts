@@ -96,8 +96,101 @@ class Store {
 
   constructor() {
     this.state = this.loadFromStorage();
+    this.autoRepairMissingTeachers();
     // Khởi tạo kiểm tra và đồng bộ Supabase ngay lập tức
     this.initCloudSync();
+  }
+
+  public findBestTeacherForAssignment(subjectId: string, componentId?: string, classId?: string): string {
+    const teachers = this.state.teachers;
+    if (!teachers || teachers.length === 0) return '';
+
+    // 1. First priority: Teacher qualified for the specific component (e.g. comp_phy, comp_chem, comp_bio, comp_hist, comp_geo)
+    if (componentId) {
+      const compTeacher = teachers.find(t => t.qualifiedSubjectIds?.includes(componentId));
+      if (compTeacher) return compTeacher.id;
+
+      // Check other assignments for the same component to balance or inherit teacher
+      const existingSameComp = this.state.masterAssignments.find(
+        m => m.subjectId === subjectId && m.componentId === componentId && m.teacherId && teachers.some(t => t.id === m.teacherId)
+      );
+      if (existingSameComp?.teacherId) return existingSameComp.teacherId;
+    }
+
+    // 2. Second priority: Teacher qualified for the subject or main subject
+    const subjectTeacher = teachers.find(t => t.qualifiedSubjectIds?.includes(subjectId) || t.mainSubjectId === subjectId);
+    if (subjectTeacher) return subjectTeacher.id;
+
+    // 3. Third priority: Teacher of the same department / subject group
+    const subject = this.state.subjects.find(s => s.id === subjectId);
+    if (subject) {
+      const deptKeyword = subject.category === 'natural_science' ? 'KHTN' : subject.category === 'social_science' ? 'KHXH' : '';
+      if (deptKeyword) {
+        const deptTeacher = teachers.find(t => t.department?.includes(deptKeyword));
+        if (deptTeacher) return deptTeacher.id;
+      }
+    }
+
+    // 4. Fourth priority: Any teacher assigned to this subject elsewhere
+    const anySameSubject = this.state.masterAssignments.find(
+      m => m.subjectId === subjectId && m.teacherId && teachers.some(t => t.id === m.teacherId)
+    );
+    if (anySameSubject?.teacherId) return anySameSubject.teacherId;
+
+    // Fallback: first available teacher
+    return teachers[0].id;
+  }
+
+  public autoRepairMissingTeachers(weekId?: string): number {
+    let fixedCount = 0;
+    const teachers = this.state.teachers;
+    if (!teachers || teachers.length === 0) return 0;
+
+    const teacherMap = new Set(teachers.map(t => t.id));
+
+    // 1. Fix Master Assignments
+    this.state.masterAssignments.forEach(asg => {
+      if (!asg.teacherId || asg.teacherId.trim() === '' || !teacherMap.has(asg.teacherId)) {
+        const bestTeacherId = this.findBestTeacherForAssignment(asg.subjectId, asg.componentId, asg.classId);
+        if (bestTeacherId) {
+          asg.teacherId = bestTeacherId;
+          fixedCount++;
+        }
+      }
+    });
+
+    // 2. Fix Weekly Assignments for target week(s) or all weeks
+    const targetWeeks = weekId ? [weekId] : Object.keys(this.state.weeklyAssignments);
+    targetWeeks.forEach(wId => {
+      const wList = this.state.weeklyAssignments[wId];
+      if (wList && wList.length > 0) {
+        wList.forEach(asg => {
+          if (!asg.teacherId || asg.teacherId.trim() === '' || !teacherMap.has(asg.teacherId)) {
+            // Check master assignment first
+            const masterMatch = this.state.masterAssignments.find(
+              m => m.classId === asg.classId && m.subjectId === asg.subjectId && (m.componentId || '') === (asg.componentId || '')
+            );
+            if (masterMatch?.teacherId && teacherMap.has(masterMatch.teacherId)) {
+              asg.teacherId = masterMatch.teacherId;
+              fixedCount++;
+            } else {
+              const bestTeacherId = this.findBestTeacherForAssignment(asg.subjectId, asg.componentId, asg.classId);
+              if (bestTeacherId) {
+                asg.teacherId = bestTeacherId;
+                fixedCount++;
+              }
+            }
+          }
+        });
+      }
+    });
+
+    if (fixedCount > 0) {
+      this.save(false);
+      this.addAuditLog('Tự động sửa lỗi phân công', `Đã tự động gán và sửa ${fixedCount} phân công thiếu hoặc sai mã giáo viên.`);
+    }
+
+    return fixedCount;
   }
 
   public isReady(): boolean {
@@ -693,15 +786,14 @@ class Store {
           sbj.components.forEach(comp => {
             const exists = masterList.find(m => m.classId === cls.id && m.subjectId === sbj.id && m.componentId === comp.id);
             if (!exists) {
-              const teacher = this.state.teachers.find(t => t.qualifiedSubjectIds?.includes(comp.id)) ||
-                              this.state.teachers.find(t => t.qualifiedSubjectIds?.includes(sbj.id) || t.mainSubjectId === sbj.id);
+              const bestTeacher = this.findBestTeacherForAssignment(sbj.id, comp.id, cls.id);
               masterList.push({
                 id: `masg_${Date.now()}_${Math.random().toString(36).substr(2,4)}`,
                 academicYearId: this.state.academicYears[0]?.id || '',
                 classId: cls.id,
                 subjectId: sbj.id,
                 componentId: comp.id,
-                teacherId: '',
+                teacherId: bestTeacher,
                 periodsPerWeek: comp.defaultPeriodsPerWeek || 2
               });
               addedCount++;
@@ -710,12 +802,13 @@ class Store {
         } else {
           const exists = masterList.find(m => m.classId === cls.id && m.subjectId === sbj.id && !m.componentId);
           if (!exists) {
+            const bestTeacher = this.findBestTeacherForAssignment(sbj.id, undefined, cls.id);
             masterList.push({
               id: `masg_${Date.now()}_${Math.random().toString(36).substr(2,4)}`,
               academicYearId: this.state.academicYears[0]?.id || '',
               classId: cls.id,
               subjectId: sbj.id,
-              teacherId: '',
+              teacherId: bestTeacher,
               periodsPerWeek: sbj.defaultPeriodsPerWeek || 3
             });
             addedCount++;
@@ -790,6 +883,13 @@ class Store {
   public scanAndFixTimetable(weekId: string): { fixedCount: number; messages: string[] } {
     const messages: string[] = [];
     let fixedCount = 0;
+
+    // 0.0 Auto repair any missing or invalid teachers across master & weekly assignments
+    const fixedTeachers = this.autoRepairMissingTeachers(weekId);
+    if (fixedTeachers > 0) {
+      messages.push(`Đã tự động gán và sửa giáo viên bộ môn cho ${fixedTeachers} phân công thiếu hoặc sai mã GV.`);
+      fixedCount += fixedTeachers;
+    }
 
     // 0. Ensure all classes have enough capacity (shift 'both', maxPeriodsPerDay 9) to prevent empty slots
     this.state.classes.forEach(c => {
@@ -915,9 +1015,19 @@ class Store {
     return this.state.rotationConfigs;
   }
 
-  public saveRotationConfigs(configs: RotationConfigs) {
+  public saveRotationConfigs(configs: RotationConfigs, notify: boolean = false) {
     this.state.rotationConfigs = JSON.parse(JSON.stringify(configs));
-    this.save();
+    if (notify) {
+      this.save();
+    } else {
+      if (typeof window !== 'undefined' && window.localStorage) {
+        try {
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(this.state));
+        } catch (e) {
+          console.error('Failed to save to localStorage:', e);
+        }
+      }
+    }
   }
 
   public applyRotationConfigs(
@@ -977,13 +1087,14 @@ class Store {
           if (mIdx >= 0) {
             newMasterList[mIdx] = { ...newMasterList[mIdx], periodsPerWeek: p };
           } else if (p > 0) {
+            const bestTeacher = this.findBestTeacherForAssignment(khtnSubject.id, comp.id, c.id);
             newMasterList.push({
               id: `masg_rot_${c.id}_${comp.id}`,
               academicYearId: currentAcademicYearId,
               classId: c.id,
               subjectId: khtnSubject.id,
               componentId: comp.id,
-              teacherId: '',
+              teacherId: bestTeacher,
               periodsPerWeek: p
             });
           }
@@ -1005,13 +1116,14 @@ class Store {
           if (mIdx >= 0) {
             newMasterList[mIdx] = { ...newMasterList[mIdx], periodsPerWeek: p };
           } else if (p > 0) {
+            const bestTeacher = this.findBestTeacherForAssignment(khxhSubject.id, comp.id, c.id);
             newMasterList.push({
               id: `masg_rot_${c.id}_${comp.id}`,
               academicYearId: currentAcademicYearId,
               classId: c.id,
               subjectId: khxhSubject.id,
               componentId: comp.id,
-              teacherId: '',
+              teacherId: bestTeacher,
               periodsPerWeek: p
             });
           }
@@ -1048,8 +1160,13 @@ class Store {
             );
 
             if (idxInWeek >= 0) {
+              const curTeacher = weekAssignments[idxInWeek].teacherId;
+              const validTeacher = (curTeacher && this.state.teachers.some(t => t.id === curTeacher))
+                ? curTeacher
+                : this.findBestTeacherForAssignment(khtnSubject.id, comp.id, c.id);
               weekAssignments[idxInWeek] = {
                 ...weekAssignments[idxInWeek],
+                teacherId: validTeacher,
                 periodsPerWeek: p,
                 isCustomized: true
               };
@@ -1057,13 +1174,16 @@ class Store {
               const masterMatch = this.state.masterAssignments.find(
                 m => m.classId === c.id && m.subjectId === khtnSubject.id && (m.componentId === comp.id || m.componentId === comp.code)
               );
+              const bestTeacher = (masterMatch?.teacherId && this.state.teachers.some(t => t.id === masterMatch.teacherId))
+                ? masterMatch.teacherId
+                : this.findBestTeacherForAssignment(khtnSubject.id, comp.id, c.id);
               weekAssignments.push({
                 id: `wasg_rot_${w.id}_${c.id}_${comp.id}`,
                 weekId: w.id,
                 classId: c.id,
                 subjectId: khtnSubject.id,
                 componentId: comp.id,
-                teacherId: masterMatch?.teacherId || '',
+                teacherId: bestTeacher,
                 periodsPerWeek: p,
                 isCustomized: true
               });
@@ -1087,8 +1207,13 @@ class Store {
             );
 
             if (idxInWeek >= 0) {
+              const curTeacher = weekAssignments[idxInWeek].teacherId;
+              const validTeacher = (curTeacher && this.state.teachers.some(t => t.id === curTeacher))
+                ? curTeacher
+                : this.findBestTeacherForAssignment(khxhSubject.id, comp.id, c.id);
               weekAssignments[idxInWeek] = {
                 ...weekAssignments[idxInWeek],
+                teacherId: validTeacher,
                 periodsPerWeek: p,
                 isCustomized: true
               };
@@ -1096,13 +1221,16 @@ class Store {
               const masterMatch = this.state.masterAssignments.find(
                 m => m.classId === c.id && m.subjectId === khxhSubject.id && (m.componentId === comp.id || m.componentId === comp.code)
               );
+              const bestTeacher = (masterMatch?.teacherId && this.state.teachers.some(t => t.id === masterMatch.teacherId))
+                ? masterMatch.teacherId
+                : this.findBestTeacherForAssignment(khxhSubject.id, comp.id, c.id);
               weekAssignments.push({
                 id: `wasg_rot_${w.id}_${c.id}_${comp.id}`,
                 weekId: w.id,
                 classId: c.id,
                 subjectId: khxhSubject.id,
                 componentId: comp.id,
-                teacherId: masterMatch?.teacherId || '',
+                teacherId: bestTeacher,
                 periodsPerWeek: p,
                 isCustomized: true
               });

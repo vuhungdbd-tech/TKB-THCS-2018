@@ -63,32 +63,50 @@ export function runPreCheck(state: DatabaseState, weekId: string): PreCheckResul
       });
     }
 
-    // Check teacher existence
-    const teacher = state.teachers.find(t => t.id === asg.teacherId);
-    if (!teacher) {
-      issues.push({
-        type: 'error',
-        category: 'precheck',
-        code: 'INVALID_TEACHER_REF',
-        message: `Phân công tham chiếu tới giáo viên không tồn tại (ID: ${asg.teacherId}).`,
-        details: { teacherId: asg.teacherId }
-      });
-    }
-
     // Check subject / component existence
     const subject = state.subjects.find(s => s.id === asg.subjectId);
+    const component = subject?.components?.find(c => c.id === asg.componentId);
+    const subjectLabel = component ? `${subject?.name || asg.subjectId} (${component.name})` : (subject?.name || asg.subjectId);
+
     if (!subject) {
       issues.push({
         type: 'error',
         category: 'precheck',
         code: 'INVALID_SUBJECT_REF',
-        message: `Phân công tham chiếu tới môn học không tồn tại (ID: ${asg.subjectId}).`,
-        details: { subjectId: asg.subjectId }
+        message: `Phân công tham chiếu tới môn học không tồn tại (Mã môn: ${asg.subjectId}).`,
+        details: { subjectId: asg.subjectId },
+        recommendation: 'Kiểm tra lại danh mục môn học hoặc xóa phân công thừa.'
       });
     }
 
+    // Check teacher existence
+    if (!asg.teacherId || asg.teacherId.trim() === '') {
+      issues.push({
+        type: 'warning',
+        category: 'precheck',
+        code: 'UNASSIGNED_TEACHER',
+        message: `Lớp ${cls?.name || asg.classId} môn ${subjectLabel} (${asg.periodsPerWeek} tiết) chưa được gán giáo viên.`,
+        details: { classId: asg.classId, subjectId: asg.subjectId, componentId: asg.componentId },
+        recommendation: 'Nhấn "⚡ Tự động sửa & Gán GV" để hệ thống tự phân công theo chuyên môn, hoặc gán thủ công tại trang Phân công.'
+      });
+    } else {
+      const teacher = state.teachers.find(t => t.id === asg.teacherId);
+      if (!teacher) {
+        issues.push({
+          type: 'error',
+          category: 'precheck',
+          code: 'INVALID_TEACHER_REF',
+          message: `Phân công lớp ${cls?.name || asg.classId} môn ${subjectLabel} tham chiếu tới giáo viên không tồn tại (Mã GV: ${asg.teacherId}).`,
+          details: { teacherId: asg.teacherId },
+          recommendation: 'Nhấn "⚡ Tự động sửa & Gán GV" để tự động thay thế bằng giáo viên hợp lệ.'
+        });
+      }
+    }
+
     classPeriodCounts[asg.classId] = (classPeriodCounts[asg.classId] || 0) + asg.periodsPerWeek;
-    teacherPeriodCounts[asg.teacherId] = (teacherPeriodCounts[asg.teacherId] || 0) + asg.periodsPerWeek;
+    if (asg.teacherId) {
+      teacherPeriodCounts[asg.teacherId] = (teacherPeriodCounts[asg.teacherId] || 0) + asg.periodsPerWeek;
+    }
   });
 
   // 1.1 Check for Duplicate Class-Subject Assignments (Trùng môn / Trùng lớp)

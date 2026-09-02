@@ -166,13 +166,22 @@ export const SchedulerView: React.FC<SchedulerViewProps> = ({ onNavigate }) => {
         )}
 
         {preCheckResult?.issues && preCheckResult.issues.length > 0 && (
-          <div className="space-y-2 pt-2">
-            <h3 className="text-xs font-bold text-slate-300">CÁC CẢNH BÁO PRE-CHECK:</h3>
-            <div className="space-y-2">
+          <div className="space-y-3 pt-2">
+            <div className="flex items-center justify-between">
+              <h3 className="text-xs font-bold text-slate-300">CÁC CẢNH BÁO PRE-CHECK ({preCheckResult.issues.length}):</h3>
+              <button
+                onClick={handleScanAndFix}
+                className="flex items-center space-x-1.5 bg-gradient-to-r from-indigo-600 to-emerald-600 hover:from-indigo-500 hover:to-emerald-500 text-white font-bold px-3 py-1.5 rounded-lg text-xs transition shadow-md"
+              >
+                <Sparkles className="w-3.5 h-3.5" />
+                <span>⚡ Tự động sửa & Gán GV theo chuyên môn</span>
+              </button>
+            </div>
+            <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
               {preCheckResult.issues.map((issue, idx) => (
                 <div key={idx} className="p-3 bg-amber-950/30 border border-amber-900/40 rounded-xl text-xs space-y-1">
                   <div className="flex items-center space-x-2 text-amber-300 font-bold">
-                    <AlertTriangle className="w-4 h-4" />
+                    <AlertTriangle className="w-4 h-4 shrink-0" />
                     <span>[{issue.code}] {issue.message}</span>
                   </div>
                   {issue.recommendation && (
@@ -233,7 +242,7 @@ export const SchedulerView: React.FC<SchedulerViewProps> = ({ onNavigate }) => {
             ⚡ TỐI ƯU HÓA MÔN ĐẶC THÙ (TIẾNG ANH, THỂ DỤC, TIN HỌC...)
           </span>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
             <label className="flex items-start space-x-2.5 cursor-pointer bg-slate-900/80 p-3 rounded-xl border border-slate-800/80 hover:border-indigo-500/40 transition">
               <input
                 type="checkbox"
@@ -249,6 +258,21 @@ export const SchedulerView: React.FC<SchedulerViewProps> = ({ onNavigate }) => {
               </div>
             </label>
 
+            <label className="flex items-start space-x-2.5 cursor-pointer bg-slate-900/80 p-3 rounded-xl border border-indigo-500/30 hover:border-indigo-500/60 transition bg-indigo-950/20">
+              <input
+                type="checkbox"
+                checked={allowSameGradeParallel}
+                onChange={(e) => setAllowSameGradeParallel(e.target.checked)}
+                className="mt-0.5 rounded border-slate-700 text-indigo-500 focus:ring-indigo-500 bg-slate-950"
+              />
+              <div>
+                <span className="font-bold text-indigo-300 block">✨ Xếp Trùng Tiết Cùng Khối (Sáng & Chiều)</span>
+                <span className="text-[11px] text-slate-300 leading-snug block mt-0.5">
+                  Khi các môn không thể xếp hết trong tuần ở 1 buổi, tự động xếp cả sáng & chiều và sắp xếp trùng tiết (song song) giữa các lớp cùng khối.
+                </span>
+              </div>
+            </label>
+
             <label className="flex items-start space-x-2.5 cursor-pointer bg-slate-900/80 p-3 rounded-xl border border-slate-800/80 hover:border-indigo-500/40 transition">
               <input
                 type="checkbox"
@@ -257,7 +281,7 @@ export const SchedulerView: React.FC<SchedulerViewProps> = ({ onNavigate }) => {
                 className="mt-0.5 rounded border-slate-700 text-indigo-600 focus:ring-indigo-500 bg-slate-950"
               />
               <div>
-                <span className="font-bold text-emerald-400 block">✓ Khóa Cứng: Chống Trùng Tiết Giáo Viên 100%</span>
+                <span className="font-bold text-emerald-400 block">✓ Khóa Cứng: Chống Trùng Tiết Giáo Viên</span>
                 <span className="text-[11px] text-slate-400 leading-snug block mt-0.5">
                   Tuyệt đối không để xảy ra hiện tượng 1 giáo viên bị xếp trùng tiết cùng lúc ở 2 lớp khác nhau (cả cùng khối lẫn khác khối).
                 </span>
