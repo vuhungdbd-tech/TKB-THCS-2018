@@ -91,16 +91,18 @@ export const AssignmentsView: React.FC = () => {
     grade_9: { odd: { hist: 1, geo: 2 }, even: { hist: 2, geo: 1 } },
   });
 
-  // Helper sync functions to guarantee immediate persistence & zero data loss
+  // Helper sync functions to guarantee immediate persistence, zero data loss & instant TKB synchronization
   const syncMaster = (newList: MasterAssignment[]) => {
     setMasterList(newList);
     state.masterAssignments = newList;
     store.save();
+    store.syncTimetableWithAssignments(currentWeek.id);
   };
 
   const syncWeekly = (newList: WeeklyAssignment[]) => {
     setWeeklyList(newList);
     store.saveWeeklyAssignments(currentWeek.id, newList);
+    store.syncTimetableWithAssignments(currentWeek.id);
   };
 
   // Handle open add assignment modal with prefilled teacher & class
@@ -645,6 +647,19 @@ export const AssignmentsView: React.FC = () => {
 
             <button
               onClick={() => {
+                const count = store.syncTimetableWithAssignments(currentWeek.id);
+                setSavedMsg(true);
+                setTimeout(() => setSavedMsg(false), 3000);
+                alert(`Đã đồng bộ và làm sạch giáo viên cho ${count} tiết trên Thời khóa biểu ${currentWeek.name}!`);
+              }}
+              className="flex items-center space-x-1.5 bg-blue-600/10 hover:bg-blue-600/20 text-blue-300 border border-blue-500/30 text-xs font-semibold px-3 py-2 rounded-xl transition shadow-sm"
+              title="Đồng bộ ngay giáo viên từ Phân công vào tất cả các tiết trên Thời khóa biểu"
+            >
+              <span>⚡ Đồng bộ sang TKB</span>
+            </button>
+
+            <button
+              onClick={() => {
                 const count = store.syncSubjectsToMasterAssignments();
                 setMasterList([...state.masterAssignments]);
                 alert(`Đã đồng bộ thành công! Đã tự động bổ sung ${count} phân công môn học mới cho các lớp.`);
@@ -1044,7 +1059,7 @@ export const AssignmentsView: React.FC = () => {
                               return (
                                 <button
                                   key={cls.id}
-                                  onClick={() => {
+                                   onClick={() => {
                                     const currentList = mode === 'master' ? masterList : weeklyList;
                                     const existingIndex = currentList.findIndex(
                                       a => a.classId === cls.id && a.subjectId === item.subjectId && (item.componentId ? a.componentId === item.componentId : !a.componentId)
@@ -1059,8 +1074,7 @@ export const AssignmentsView: React.FC = () => {
                                           syncMaster(newList);
                                         } else {
                                           const newList = weeklyList.filter((_, idx) => idx !== existingIndex);
-                                          store.saveWeeklyAssignments(currentWeek.id, newList);
-                                          setWeeklyList(newList);
+                                          syncWeekly(newList);
                                         }
                                       } else {
                                         // Reassign to selected teacher
@@ -1071,8 +1085,7 @@ export const AssignmentsView: React.FC = () => {
                                         } else {
                                           const newList = [...weeklyList];
                                           newList[existingIndex] = { ...existing, teacherId: selectedTeacherId };
-                                          store.saveWeeklyAssignments(currentWeek.id, newList);
-                                          setWeeklyList(newList);
+                                          syncWeekly(newList);
                                         }
                                       }
                                     } else {
@@ -1095,8 +1108,7 @@ export const AssignmentsView: React.FC = () => {
                                         syncMaster(newList);
                                       } else {
                                         const newList = [...weeklyList, newAsg];
-                                        store.saveWeeklyAssignments(currentWeek.id, newList);
-                                        setWeeklyList(newList);
+                                        syncWeekly(newList);
                                       }
                                     }
                                   }}
