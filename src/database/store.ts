@@ -605,6 +605,62 @@ class Store {
     return resolvedCount;
   }
 
+  public cleanDuplicateAssignments(weekId?: string): number {
+    let removedCount = 0;
+
+    // Deduplicate Master Assignments
+    const uniqueMasterMap = new Map<string, MasterAssignment>();
+    const newMasterList: MasterAssignment[] = [];
+
+    this.state.masterAssignments.forEach(asg => {
+      const key = `${asg.classId}_${asg.subjectId}_${asg.componentId || 'none'}`;
+      if (!uniqueMasterMap.has(key)) {
+        uniqueMasterMap.set(key, asg);
+        newMasterList.push(asg);
+      } else {
+        // Duplicate found
+        removedCount++;
+      }
+    });
+
+    if (removedCount > 0) {
+      this.state.masterAssignments = newMasterList;
+      this.addAuditLog('Gỡ trùng phân công', `Đã tự động gỡ ${removedCount} bản ghi phân công gốc trùng lặp.`);
+    }
+
+    // Deduplicate Weekly Assignments if weekId is provided or for all weeks
+    const targetWeeks = weekId ? [weekId] : Object.keys(this.state.weeklyAssignments);
+    targetWeeks.forEach(wId => {
+      const wList = this.state.weeklyAssignments[wId];
+      if (wList && wList.length > 0) {
+        const uniqueWeeklyMap = new Map<string, WeeklyAssignment>();
+        const newWeeklyList: WeeklyAssignment[] = [];
+        let weekRemoved = 0;
+
+        wList.forEach(asg => {
+          const key = `${asg.classId}_${asg.subjectId}_${asg.componentId || 'none'}`;
+          if (!uniqueWeeklyMap.has(key)) {
+            uniqueWeeklyMap.set(key, asg);
+            newWeeklyList.push(asg);
+          } else {
+            weekRemoved++;
+          }
+        });
+
+        if (weekRemoved > 0) {
+          this.state.weeklyAssignments[wId] = newWeeklyList;
+          removedCount += weekRemoved;
+        }
+      }
+    });
+
+    if (removedCount > 0) {
+      this.save();
+    }
+
+    return removedCount;
+  }
+
   public syncSubjectsToMasterAssignments(): number {
     let addedCount = 0;
     const classes = this.state.classes;

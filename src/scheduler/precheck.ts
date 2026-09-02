@@ -91,6 +91,36 @@ export function runPreCheck(state: DatabaseState, weekId: string): PreCheckResul
     teacherPeriodCounts[asg.teacherId] = (teacherPeriodCounts[asg.teacherId] || 0) + asg.periodsPerWeek;
   });
 
+  // 1.1 Check for Duplicate Class-Subject Assignments (Trùng môn / Trùng lớp)
+  const assignmentKeyMap = new Map<string, WeeklyAssignment[]>();
+  assignments.forEach(asg => {
+    const key = `${asg.classId}_${asg.subjectId}_${asg.componentId || 'none'}`;
+    if (!assignmentKeyMap.has(key)) assignmentKeyMap.set(key, []);
+    assignmentKeyMap.get(key)!.push(asg);
+  });
+
+  assignmentKeyMap.forEach((duplicates, key) => {
+    if (duplicates.length > 1) {
+      const sample = duplicates[0];
+      const cls = state.classes.find(c => c.id === sample.classId);
+      const sbj = state.subjects.find(s => s.id === sample.subjectId);
+      const comp = sbj?.components?.find(c => c.id === sample.componentId);
+      const teacherNames = duplicates.map(a => {
+        const t = state.teachers.find(tch => tch.id === a.teacherId);
+        return t ? `${t.fullName} (${a.periodsPerWeek}t)` : 'Chưa gán GV';
+      }).join(', ');
+
+      issues.push({
+        type: 'error',
+        category: 'precheck',
+        code: 'DUPLICATE_ASSIGNMENT_COLLISION',
+        message: `Lỗi trùng phân công: Lớp ${cls?.name || sample.classId} môn ${sbj?.name || sample.subjectId}${comp ? ` (${comp.name})` : ''} bị phân công ${duplicates.length} lần (${teacherNames}). Trùng môn cùng một lớp!`,
+        details: { classId: sample.classId, subjectId: sample.subjectId, componentId: sample.componentId },
+        recommendation: `Vào Phân công giảng dạy để xóa bớt bản ghi trùng hoặc gộp thành một giáo viên duy nhất phụ trách môn này cho lớp ${cls?.name}.`
+      });
+    }
+  });
+
   // 2. Check Class Total Capacity vs Demand
   Object.entries(classPeriodCounts).forEach(([classId, count]) => {
     const cls = state.classes.find(c => c.id === classId);

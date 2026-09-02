@@ -244,6 +244,7 @@ export interface ValidationIssue {
     className?: string;
     subjectId?: string;
     subjectName?: string;
+    componentId?: string;
     teacherId?: string;
     teacherName?: string;
     dayOfWeek?: number;

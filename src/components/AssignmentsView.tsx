@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Users, Save, Check, AlertCircle, Layers, Filter, Plus, Trash2, UserCheck, School, Edit } from 'lucide-react';
+import React, { useState, useMemo } from 'react';
+import { Users, Save, Check, AlertCircle, AlertTriangle, Layers, Filter, Plus, Trash2, UserCheck, School, Edit } from 'lucide-react';
 import { store } from '../database/store';
 import { MasterAssignment, WeeklyAssignment, Teacher } from '../types';
 
@@ -205,6 +205,35 @@ export const AssignmentsView: React.FC = () => {
   const handleCreateAssignment = (e: React.FormEvent, keepOpen: boolean = false) => {
     e.preventDefault();
     if (!addTeacherId || !addSubjectId || addClassIds.length === 0) return;
+
+    // Check for existing assignments in the selected classes for this subject/component
+    const currentList = mode === 'master' ? masterList : weeklyList;
+    const existingConflicts: { className: string; oldTeacherName: string }[] = [];
+
+    addClassIds.forEach(clsId => {
+      const existing = currentList.find(
+        a => a.classId === clsId && a.subjectId === addSubjectId && (a.componentId || '') === (addComponentId || '')
+      );
+      if (existing && existing.teacherId && existing.teacherId !== addTeacherId) {
+        const cls = state.classes.find(c => c.id === clsId);
+        const oldTch = state.teachers.find(t => t.id === existing.teacherId);
+        existingConflicts.push({
+          className: cls?.name || clsId,
+          oldTeacherName: oldTch?.fullName || 'Giáo viên khác'
+        });
+      }
+    });
+
+    if (existingConflicts.length > 0) {
+      const newTch = state.teachers.find(t => t.id === addTeacherId)?.fullName || 'GV mới';
+      const sbjName = state.subjects.find(s => s.id === addSubjectId)?.name || 'Môn học';
+      const conflictListStr = existingConflicts.map(c => `• Lớp ${c.className}: Hiện do GV ${c.oldTeacherName} dạy`).join('\n');
+      const confirmMsg = `⚠️ CẢNH BÁO TRÙNG PHÂN CÔNG MÔN HỌC:\n\nCác lớp sau đã có giáo viên phụ trách môn ${sbjName}:\n${conflictListStr}\n\nViệc phân công cho GV ${newTch} sẽ thay thế giáo viên cũ cho các lớp này để tránh hiện tượng trùng môn, trùng lớp. Bạn có chắc chắn muốn thực hiện?`;
+      
+      if (!confirm(confirmMsg)) {
+        return;
+      }
+    }
 
     if (mode === 'master') {
       let updatedMaster = [...masterList];
@@ -483,6 +512,60 @@ export const AssignmentsView: React.FC = () => {
   const selectedClassObj = state.classes.find(c => c.id === selectedClassId);
   const selectedTeacherObj = state.teachers.find(t => t.id === selectedTeacherId);
 
+  // Detect duplicate assignments in current mode (same class + subject + component assigned more than once)
+  const currentAssignmentsList = mode === 'master' ? masterList : weeklyList;
+  const duplicateAssignmentGroups = useMemo(() => {
+    const map = new Map<string, typeof currentAssignmentsList>();
+    currentAssignmentsList.forEach(a => {
+      const key = `${a.classId}_${a.subjectId}_${a.componentId || 'none'}`;
+      if (!map.has(key)) map.set(key, []);
+      map.get(key)!.push(a);
+    });
+
+    const duplicates: { key: string; classId: string; subjectId: string; componentId?: string; items: typeof currentAssignmentsList }[] = [];
+    map.forEach((items, key) => {
+      if (items.length > 1) {
+        duplicates.push({
+          key,
+          classId: items[0].classId,
+          subjectId: items[0].subjectId,
+          componentId: items[0].componentId,
+          items
+        });
+      }
+    });
+    return duplicates;
+  }, [currentAssignmentsList]);
+
+  const handleCleanDuplicates = () => {
+    const count = store.cleanDuplicateAssignments(mode === 'weekly' ? currentWeek.id : undefined);
+    if (mode === 'master') {
+      setMasterList([...store.getState().masterAssignments]);
+    } else {
+      setWeeklyList([...store.getWeeklyAssignments(currentWeek.id)]);
+    }
+    setSavedMsg(true);
+    setTimeout(() => setSavedMsg(false), 3000);
+    alert(`Đã tự động gỡ bỏ và hợp nhất ${count} bản ghi phân công trùng lặp thành công!`);
+  };
+
+  const handleVerifyAssignments = () => {
+    if (duplicateAssignmentGroups.length === 0) {
+      alert(`✅ BẢNG PHÂN CÔNG CHUẨN MỰC:\n\nKhông phát hiện trường hợp trùng môn, trùng lớp nào trong hệ thống! Toàn bộ các môn học đều được phân công duy nhất cho 1 giáo viên phụ trách.`);
+    } else {
+      const details = duplicateAssignmentGroups.map(g => {
+        const cls = state.classes.find(c => c.id === g.classId)?.name || g.classId;
+        const sbj = state.subjects.find(s => s.id === g.subjectId);
+        const comp = sbj?.components?.find(c => c.id === g.componentId);
+        const sName = comp ? `${sbj?.name} (${comp.name})` : (sbj?.name || g.subjectId);
+        const tNames = g.items.map(a => state.teachers.find(t => t.id === a.teacherId)?.fullName || 'Chưa gán GV').join(', ');
+        return `• Lớp ${cls} - Môn ${sName}: Bị gán cho ${g.items.length} giáo viên (${tNames})`;
+      }).join('\n');
+
+      alert(`⚠️ PHÁT HIỆN ${duplicateAssignmentGroups.length} TRƯỜNG HỢP TRÙNG PHÂN CÔNG MÔN/LỚP:\n\n${details}\n\nHãy bấm '⚡ Tự động gỡ trùng phân công' để khắc phục ngay!`);
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-800 pb-4">
@@ -557,6 +640,29 @@ export const AssignmentsView: React.FC = () => {
         <div className="bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs px-4 py-3 rounded-xl flex items-center space-x-2 shadow-sm animate-pulse">
           <Check className="w-4 h-4" />
           <span>Đã lưu & đồng bộ dữ liệu phân công giảng dạy toàn hệ thống thành công!</span>
+        </div>
+      )}
+
+      {/* Duplicate Assignment Warning Banner */}
+      {duplicateAssignmentGroups.length > 0 && (
+        <div className="bg-rose-950/40 border border-rose-500/40 rounded-2xl p-4 flex flex-col md:flex-row md:items-center justify-between gap-3 shadow-lg shadow-rose-950/20">
+          <div className="flex items-start space-x-3">
+            <AlertTriangle className="w-5 h-5 text-rose-400 shrink-0 mt-0.5" />
+            <div>
+              <h4 className="text-sm font-bold text-rose-200">
+                CẢNH BÁO TRÙNG PHÂN CÔNG: Phát hiện {duplicateAssignmentGroups.length} môn học bị trùng lặp trong cùng một lớp!
+              </h4>
+              <p className="text-xs text-rose-300/80 mt-0.5">
+                Khi một môn học trong cùng lớp bị phân công cho nhiều giáo viên hoặc có nhiều bản ghi trùng lặp, hệ thống sẽ gây ra lỗi trùng tiết trùng lớp. Hãy bấm nút bên cạnh để tự động gỡ trùng hoặc hợp nhất thành 1 giáo viên duy nhất.
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={handleCleanDuplicates}
+            className="px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs rounded-xl transition shadow-md shadow-rose-600/30 shrink-0 flex items-center space-x-1.5"
+          >
+            <span>⚡ Tự động gỡ trùng phân công</span>
+          </button>
         </div>
       )}
 
@@ -671,6 +777,28 @@ export const AssignmentsView: React.FC = () => {
             </button>
 
             <button
+              onClick={handleVerifyAssignments}
+              className={`flex items-center space-x-1.5 text-xs font-semibold px-3 py-2 rounded-xl transition shadow-sm border ${
+                duplicateAssignmentGroups.length > 0
+                  ? 'bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border-rose-500/40 animate-pulse'
+                  : 'bg-emerald-600/10 hover:bg-emerald-600/20 text-emerald-300 border border-emerald-600/30'
+              }`}
+              title="Kiểm tra phát hiện trùng môn, trùng lớp"
+            >
+              {duplicateAssignmentGroups.length > 0 ? (
+                <>
+                  <AlertTriangle className="w-4 h-4 text-rose-400" />
+                  <span>Phát hiện {duplicateAssignmentGroups.length} trùng môn!</span>
+                </>
+              ) : (
+                <>
+                  <Check className="w-4 h-4 text-emerald-400" />
+                  <span>Kiểm tra phân công</span>
+                </>
+              )}
+            </button>
+
+            <button
               onClick={handleOpenAddModal}
               className="flex items-center space-x-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold px-3.5 py-2 rounded-xl transition shrink-0 shadow-md shadow-indigo-600/20"
             >
@@ -721,11 +849,19 @@ export const AssignmentsView: React.FC = () => {
                     activeMasterList.map(asg => {
                       const sbj = state.subjects.find(s => s.id === asg.subjectId);
                       const comp = sbj?.components?.find(c => c.id === asg.componentId);
+                      const isDup = duplicateAssignmentGroups.some(
+                        g => g.classId === asg.classId && g.subjectId === asg.subjectId && (g.componentId || '') === (asg.componentId || '')
+                      );
 
                       return (
-                        <tr key={asg.id} className="hover:bg-slate-850">
+                        <tr key={asg.id} className={`hover:bg-slate-850 ${isDup ? 'bg-rose-950/20 border-l-2 border-l-rose-500' : ''}`}>
                           <td className="p-3 font-semibold text-white">
                             {sbj?.name} <span className="text-slate-500 font-mono text-[11px]">[{sbj?.code}]</span>
+                            {isDup && (
+                              <span className="ml-2 inline-block px-1.5 py-0.5 bg-rose-500/20 border border-rose-500/30 text-rose-300 rounded text-[9px] font-bold">
+                                ⚠️ Trùng môn
+                              </span>
+                            )}
                           </td>
                           <td className="p-3">
                             {comp ? (
@@ -740,7 +876,9 @@ export const AssignmentsView: React.FC = () => {
                             <select
                               value={asg.teacherId}
                               onChange={(e) => handleUpdateMasterTeacher(asg.id, e.target.value)}
-                              className="bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1 text-xs text-slate-200 focus:outline-none focus:border-indigo-500"
+                              className={`bg-slate-950 border rounded-lg px-2.5 py-1 text-xs text-slate-200 focus:outline-none focus:border-indigo-500 ${
+                                isDup ? 'border-rose-500/50 bg-rose-950/30 text-rose-200' : 'border-slate-800'
+                              }`}
                             >
                               {state.teachers.map(t => {
                                 const isMain = t.mainSubjectId === asg.subjectId;
@@ -768,7 +906,11 @@ export const AssignmentsView: React.FC = () => {
                             />
                           </td>
                           <td className="p-3 text-slate-400">
-                            <span className="text-[11px] text-slate-500">Gốc cố định</span>
+                            {isDup ? (
+                              <span className="text-[11px] text-rose-400 font-semibold">⚠️ Trùng phân công môn này trong lớp!</span>
+                            ) : (
+                              <span className="text-[11px] text-slate-500">Gốc cố định</span>
+                            )}
                           </td>
                           <td className="p-3 text-right">
                             <button
@@ -794,11 +936,19 @@ export const AssignmentsView: React.FC = () => {
                     activeWeeklyList.map(asg => {
                       const sbj = state.subjects.find(s => s.id === asg.subjectId);
                       const comp = sbj?.components?.find(c => c.id === asg.componentId);
+                      const isDup = duplicateAssignmentGroups.some(
+                        g => g.classId === asg.classId && g.subjectId === asg.subjectId && (g.componentId || '') === (asg.componentId || '')
+                      );
 
                       return (
-                        <tr key={asg.id} className="hover:bg-slate-850">
+                        <tr key={asg.id} className={`hover:bg-slate-850 ${isDup ? 'bg-rose-950/20 border-l-2 border-l-rose-500' : ''}`}>
                           <td className="p-3 font-semibold text-white">
                             {sbj?.name} <span className="text-slate-500 font-mono text-[11px]">[{sbj?.code}]</span>
+                            {isDup && (
+                              <span className="ml-2 inline-block px-1.5 py-0.5 bg-rose-500/20 border border-rose-500/30 text-rose-300 rounded text-[9px] font-bold">
+                                ⚠️ Trùng môn
+                              </span>
+                            )}
                           </td>
                           <td className="p-3">
                             {comp ? (
@@ -814,7 +964,11 @@ export const AssignmentsView: React.FC = () => {
                               value={asg.teacherId}
                               onChange={(e) => handleUpdateWeeklyTeacher(asg.id, e.target.value)}
                               className={`bg-slate-950 border rounded-lg px-2.5 py-1 text-xs text-slate-200 focus:outline-none ${
-                                asg.isCustomized ? 'border-amber-500/50 bg-amber-950/20' : 'border-slate-800'
+                                isDup
+                                  ? 'border-rose-500/50 bg-rose-950/30 text-rose-200'
+                                  : asg.isCustomized
+                                  ? 'border-amber-500/50 bg-amber-950/20'
+                                  : 'border-slate-800'
                               }`}
                             >
                               {state.teachers.map(t => {
@@ -843,7 +997,11 @@ export const AssignmentsView: React.FC = () => {
                             />
                           </td>
                           <td className="p-3">
-                            {asg.isCustomized ? (
+                            {isDup ? (
+                              <span className="bg-rose-500/20 text-rose-300 border border-rose-500/40 px-2 py-0.5 rounded text-[10px] font-bold">
+                                ⚠️ Trùng môn trong lớp
+                              </span>
+                            ) : asg.isCustomized ? (
                               <span className="bg-amber-500/10 text-amber-400 border border-amber-500/20 px-2 py-0.5 rounded text-[10px]">
                                 Đã đổi cho riêng {currentWeek.name}
                               </span>
@@ -1059,7 +1217,7 @@ export const AssignmentsView: React.FC = () => {
                               return (
                                 <button
                                   key={cls.id}
-                                   onClick={() => {
+                                    onClick={() => {
                                     const currentList = mode === 'master' ? masterList : weeklyList;
                                     const existingIndex = currentList.findIndex(
                                       a => a.classId === cls.id && a.subjectId === item.subjectId && (item.componentId ? a.componentId === item.componentId : !a.componentId)
@@ -1077,7 +1235,13 @@ export const AssignmentsView: React.FC = () => {
                                           syncWeekly(newList);
                                         }
                                       } else {
-                                        // Reassign to selected teacher
+                                        // Reassign to selected teacher with confirmation
+                                        const oldTch = state.teachers.find(t => t.id === existing.teacherId);
+                                        const newTch = selectedTeacherObj;
+                                        const sbjDisplay = comp ? `${sbj?.name} (${comp.name})` : sbj?.name;
+                                        if (!confirm(`⚠️ CẢNH BÁO TRÙNG PHÂN CÔNG MÔN HỌC:\n\nLớp ${cls.name} hiện đã được phân công môn ${sbjDisplay} cho GV ${oldTch?.fullName || 'khác'}.\n\nBạn có muốn chuyển phân công môn này sang cho GV ${newTch?.fullName} không?`)) {
+                                          return;
+                                        }
                                         if (mode === 'master') {
                                           const newList = [...masterList];
                                           newList[existingIndex] = { ...existing, teacherId: selectedTeacherId };
@@ -1282,31 +1446,55 @@ export const AssignmentsView: React.FC = () => {
                 </div>
 
                 {/* Class grid checklist */}
-                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2 pt-1">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 pt-1">
                   {state.classes.map(c => {
                     const isSelected = addClassIds.includes(c.id);
+                    const currentList = mode === 'master' ? masterList : weeklyList;
+                    const existingAsg = currentList.find(
+                      a => a.classId === c.id && a.subjectId === addSubjectId && (addComponentId ? a.componentId === addComponentId : !a.componentId)
+                    );
+                    const existingTeacher = existingAsg ? state.teachers.find(t => t.id === existingAsg.teacherId) : null;
+                    const isSameTeacher = existingTeacher?.id === addTeacherId;
+
                     return (
                       <button
                         type="button"
                         key={c.id}
                         onClick={() => toggleClassSelectionInAdd(c.id)}
-                        className={`p-2 rounded-xl border text-left flex items-center justify-between transition ${
+                        className={`p-2.5 rounded-xl border text-left flex flex-col justify-between transition gap-1 ${
                           isSelected
-                            ? 'bg-indigo-950/80 border-indigo-500 text-white font-bold shadow-sm'
+                            ? 'bg-indigo-950/80 border-indigo-500 text-white shadow-sm'
+                            : existingTeacher && !isSameTeacher
+                            ? 'bg-slate-900 border-amber-500/30 text-slate-300 hover:border-amber-500/60'
                             : 'bg-slate-900 border-slate-800/80 text-slate-400 hover:border-slate-700'
                         }`}
                       >
-                        <div className="flex items-center space-x-1.5">
-                          <span className={`w-4 h-4 rounded flex items-center justify-center text-[10px] font-bold border ${
-                            isSelected ? 'bg-indigo-600 border-indigo-400 text-white' : 'border-slate-700 bg-slate-950'
-                          }`}>
-                            {isSelected ? '✓' : ''}
+                        <div className="flex items-center justify-between w-full">
+                          <div className="flex items-center space-x-2">
+                            <span className={`w-4 h-4 rounded flex items-center justify-center text-[10px] font-bold border ${
+                              isSelected ? 'bg-indigo-600 border-indigo-400 text-white' : 'border-slate-700 bg-slate-950'
+                            }`}>
+                              {isSelected ? '✓' : ''}
+                            </span>
+                            <span className="text-xs font-bold text-white">{c.name}</span>
+                          </div>
+                          <span className="text-[10px] text-slate-400 font-mono">
+                            {c.shift === 'morning' ? 'Ca Sáng' : c.shift === 'afternoon' ? 'Ca Chiều' : 'Cả ngày'}
                           </span>
-                          <span className="text-xs">{c.name}</span>
                         </div>
-                        <span className="text-[9px] text-slate-500 font-normal">
-                          {c.shift === 'morning' ? 'Sáng' : c.shift === 'afternoon' ? 'Chiều' : 'Cả 2'}
-                        </span>
+
+                        {/* Status of this subject in this class */}
+                        <div className="text-[11px] pl-6">
+                          {existingTeacher ? (
+                            isSameTeacher ? (
+                              <span className="text-emerald-400 font-medium">✓ GV này đang dạy ({existingAsg?.periodsPerWeek}t)</span>
+                            ) : (
+                              <span className="text-amber-400 font-medium">⚠️ Đang gán: {existingTeacher.fullName} ({existingAsg?.periodsPerWeek}t)</span>
+                            )
+                          ) : (
+                            <span className="text-slate-500">Chưa có GV dạy môn này</span>
+                          )}
+                        </div>
                       </button>
                     );
                   })}

@@ -49,18 +49,27 @@ export function validateTimetable(
       const dayStr = sample.dayOfWeek;
       const periodStr = sample.period;
       const cls = state.classes.find(c => c.id === classId);
+      const subjectDetails = list.map(e => {
+        const s = state.subjects.find(sbj => sbj.id === e.subjectId);
+        const t = state.teachers.find(tch => tch.id === e.teacherId);
+        const comp = s?.components?.find(c => c.id === e.componentId);
+        const sName = comp ? comp.name : (s?.name || e.subjectId);
+        return `${sName} (${t?.fullName || 'Chưa gán GV'})`;
+      }).join(' và ');
+
       issues.push({
         type: 'error',
         category: 'hard_constraint',
         code: 'CLASS_COLLISION',
-        message: `Lớp ${cls?.name || classId} bị trùng ${list.length} tiết tại Thứ ${dayStr}, Tiết ${periodStr}.`,
+        message: `Lỗi trùng tiết, trùng lớp: Lớp ${cls?.name || classId} bị xếp trùng ${list.length} tiết học cùng lúc tại Thứ ${dayStr}, Tiết ${periodStr}: ${subjectDetails}.`,
         details: {
           classId,
           className: cls?.name,
           dayOfWeek: dayStr,
-          period: periodStr
+          period: periodStr,
+          conflictingEntries: list.map(e => e.id)
         },
-        recommendation: 'Kéo thả một trong hai môn sang khung giờ khác.'
+        recommendation: 'Kéo thả hoặc chuyển một trong các môn sang tiết khác để đảm bảo mỗi lớp chỉ học 1 tiết tại một thời điểm.'
       });
     }
   });
@@ -74,12 +83,19 @@ export function validateTimetable(
       const periodStr = sample.period;
       const tch = state.teachers.find(t => t.id === teacherId);
 
-      const classNames = list.map(e => state.classes.find(c => c.id === e.classId)?.name || e.classId).join(', ');
+      const classSubjectDetails = list.map(e => {
+        const c = state.classes.find(cls => cls.id === e.classId);
+        const s = state.subjects.find(sbj => sbj.id === e.subjectId);
+        const comp = s?.components?.find(cp => cp.id === e.componentId);
+        const sName = comp ? comp.name : (s?.name || e.subjectId);
+        return `${sName} ${c?.name || e.classId}`;
+      }).join(' và ');
+
       issues.push({
         type: 'error',
         category: 'hard_constraint',
         code: 'TEACHER_COLLISION',
-        message: `Trùng tiết giáo viên: Giáo viên ${tch?.fullName || teacherId} bị xếp trùng lịch dạy cùng lúc cho các lớp (${classNames}) tại Thứ ${dayStr}, Tiết ${periodStr}.`,
+        message: `Lỗi trùng tiết giáo viên: Giáo viên ${tch?.fullName || teacherId} bị xếp trùng lịch dạy cùng lúc cho các lớp (${classSubjectDetails}) tại Thứ ${dayStr}, Tiết ${periodStr}.`,
         details: {
           teacherId,
           teacherName: tch?.fullName,
