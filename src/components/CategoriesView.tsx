@@ -929,10 +929,9 @@ export const CategoriesView: React.FC = () => {
                         <div className="flex items-center justify-center space-x-1">
                           <input
                             type="number"
-                            min={1}
-                            max={35}
+                            min={0}
                             value={tch.maxPeriodsPerWeek}
-                            onChange={(e) => handleQuickUpdateTeacherMaxWeek(tch.id, parseInt(e.target.value, 10) || 18)}
+                            onChange={(e) => handleQuickUpdateTeacherMaxWeek(tch.id, parseInt(e.target.value, 10) || 0)}
                             className="w-14 bg-slate-950 border border-slate-800 text-center font-bold text-indigo-400 rounded-lg p-1 text-xs focus:outline-none focus:border-indigo-500"
                           />
                           <span className="text-slate-500 text-[11px]">tiết</span>
@@ -943,7 +942,6 @@ export const CategoriesView: React.FC = () => {
                           <input
                             type="number"
                             min={1}
-                            max={12}
                             value={tch.maxPeriodsPerDay || 6}
                             onChange={(e) => handleQuickUpdateTeacherMaxDay(tch.id, parseInt(e.target.value, 10) || 6)}
                             className="w-14 bg-slate-950 border border-slate-800 text-center font-bold text-amber-400 rounded-lg p-1 text-xs focus:outline-none focus:border-indigo-500"
@@ -1523,10 +1521,10 @@ export const CategoriesView: React.FC = () => {
                 <label className="block text-slate-400 mb-1">Định mức tiết / tuần</label>
                 <input
                   type="number"
-                  min={1}
-                  max={35}
+                  min={0}
                   value={newTeacherMaxWeek}
-                  onChange={(e) => setNewTeacherMaxWeek(parseInt(e.target.value, 10) || 18)}
+                  onChange={(e) => setNewTeacherMaxWeek(parseInt(e.target.value, 10) || 0)}
+                  placeholder="Nhập số tiết (VD: 39)"
                   className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-indigo-400 font-bold"
                 />
               </div>
@@ -1536,7 +1534,6 @@ export const CategoriesView: React.FC = () => {
                 <input
                   type="number"
                   min={1}
-                  max={12}
                   value={newTeacherMaxDay}
                   onChange={(e) => setNewTeacherMaxDay(parseInt(e.target.value, 10) || 6)}
                   className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-white"
@@ -1670,10 +1667,10 @@ export const CategoriesView: React.FC = () => {
                 <label className="block text-slate-400 mb-1">Định mức tiết / tuần</label>
                 <input
                   type="number"
-                  min={1}
-                  max={35}
+                  min={0}
                   value={editingTeacher.maxPeriodsPerWeek}
-                  onChange={(e) => setEditingTeacher({ ...editingTeacher, maxPeriodsPerWeek: parseInt(e.target.value, 10) || 18 })}
+                  onChange={(e) => setEditingTeacher({ ...editingTeacher, maxPeriodsPerWeek: parseInt(e.target.value, 10) || 0 })}
+                  placeholder="Nhập số tiết (VD: 39)"
                   className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-indigo-400 font-bold"
                 />
               </div>
@@ -1683,7 +1680,6 @@ export const CategoriesView: React.FC = () => {
                 <input
                   type="number"
                   min={1}
-                  max={12}
                   value={editingTeacher.maxPeriodsPerDay}
                   onChange={(e) => setEditingTeacher({ ...editingTeacher, maxPeriodsPerDay: parseInt(e.target.value, 10) || 6 })}
                   className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-white"
