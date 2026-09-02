@@ -23,17 +23,31 @@ export function App() {
   const [currentWeek, setCurrentWeek] = useState<Week>(() => store.getCurrentWeek());
   const [activeTab, setActiveTab] = useState<TabType>('dashboard');
   const [showAIAssistant, setShowAIAssistant] = useState(false);
+  const [, setRenderTick] = useState(0);
 
-  // Auto-solve initial timetable if empty on startup
+  // Subscribe to store updates (including background Supabase sync)
   useEffect(() => {
-    const ver = store.getTimetableVersion(currentWeek.id);
-    if (!ver || ver.entries.length === 0) {
-      const state = store.getState();
-      const res = solveTimetable(state, currentWeek.id, { strategy: 'fast', maxIterations: 1000 });
-      if (res.version) {
-        store.saveTimetableVersion(currentWeek.id, res.version);
+    const unsub = store.subscribe(() => {
+      setRenderTick(t => t + 1);
+      const updatedWeek = store.getCurrentWeek();
+      setCurrentWeek(updatedWeek);
+    });
+    return () => unsub();
+  }, []);
+
+  // Auto-solve initial timetable if empty on startup ONLY if not using Supabase or already synced
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      const ver = store.getTimetableVersion(currentWeek.id);
+      if (!ver || ver.entries.length === 0) {
+        const state = store.getState();
+        const res = solveTimetable(state, currentWeek.id, { strategy: 'fast', maxIterations: 1000 });
+        if (res.version) {
+          store.saveTimetableVersion(currentWeek.id, res.version);
+        }
       }
-    }
+    }, 600);
+    return () => clearTimeout(timer);
   }, []);
 
   const handleSelectWeek = (weekId: string) => {
@@ -74,6 +88,7 @@ export function App() {
         onToggleAIAssistant={() => setShowAIAssistant(!showAIAssistant)}
         onRunQuickSolve={handleRunQuickSolve}
         onResetData={handleResetData}
+        onNavigateToSupabase={() => setActiveTab('supabase')}
       />
 
       {/* Main Layout Container */}

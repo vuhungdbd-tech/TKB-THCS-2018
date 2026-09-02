@@ -1,7 +1,8 @@
-import React from 'react';
-import { Calendar, Bot, RefreshCw, Zap, Award, Sparkles, BookOpen } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Calendar, RefreshCw, Zap, Sparkles, BookOpen, Database, CloudCheck, CloudOff, Cloud, Check } from 'lucide-react';
 import { store } from '../database/store';
 import { Week } from '../types';
+import { subscribeSyncStatus, getSupabaseConfig, SyncStatus } from '../database/supabase';
 
 interface NavbarProps {
   currentWeek: Week;
@@ -9,6 +10,7 @@ interface NavbarProps {
   onToggleAIAssistant: () => void;
   onRunQuickSolve: () => void;
   onResetData: () => void;
+  onNavigateToSupabase?: () => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -16,12 +18,25 @@ export const Navbar: React.FC<NavbarProps> = ({
   onSelectWeek,
   onToggleAIAssistant,
   onRunQuickSolve,
-  onResetData
+  onResetData,
+  onNavigateToSupabase
 }) => {
   const state = store.getState();
   const weeks = state.weeks;
   const currentVer = store.getTimetableVersion(currentWeek.id);
   const rate = currentVer?.score.completionRate ?? 0;
+
+  const [syncStatus, setSyncStatus] = useState<SyncStatus>('idle');
+  const [syncMsg, setSyncMsg] = useState<string>('');
+  const config = getSupabaseConfig();
+
+  useEffect(() => {
+    const unsub = subscribeSyncStatus((status, msg) => {
+      setSyncStatus(status);
+      setSyncMsg(msg || '');
+    });
+    return () => unsub();
+  }, []);
 
   return (
     <header className="bg-slate-900 text-white border-b border-slate-800 sticky top-0 z-30 shadow-md">
@@ -65,6 +80,32 @@ export const Navbar: React.FC<NavbarProps> = ({
               {rate}% đã xếp
             </span>
           </div>
+
+          {/* Supabase Cloud Indicator */}
+          {onNavigateToSupabase && (
+            <button
+              onClick={onNavigateToSupabase}
+              title={syncMsg || (config.isConfigured ? 'Supabase đã kết nối' : 'Cấu hình kết nối Supabase Cloud')}
+              className={`hidden lg:flex items-center space-x-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium border transition ${
+                config.isConfigured
+                  ? syncStatus === 'syncing'
+                    ? 'bg-indigo-950/60 border-indigo-500/40 text-indigo-300'
+                    : syncStatus === 'error'
+                    ? 'bg-rose-950/60 border-rose-500/40 text-rose-300'
+                    : 'bg-emerald-950/60 border-emerald-500/40 text-emerald-300'
+                  : 'bg-slate-800/60 border-slate-700 text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <Database className={`w-3.5 h-3.5 ${syncStatus === 'syncing' ? 'animate-spin text-indigo-400' : config.isConfigured ? 'text-emerald-400' : 'text-slate-400'}`} />
+              <span className="text-[11px]">
+                {config.isConfigured
+                  ? syncStatus === 'syncing'
+                    ? 'Đang lưu...'
+                    : 'Supabase Cloud'
+                  : 'Kết nối Supabase'}
+              </span>
+            </button>
+          )}
         </div>
 
         {/* Right Actions */}

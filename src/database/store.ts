@@ -73,9 +73,46 @@ export interface DatabaseState {
 class Store {
   private state: DatabaseState;
   private listeners: Array<() => void> = [];
+  private isCloudLoaded: boolean = false;
 
   constructor() {
     this.state = this.loadFromStorage();
+    // Khởi tạo kiểm tra và đồng bộ Supabase ngay lập tức
+    this.initCloudSync();
+  }
+
+  public isReady(): boolean {
+    return this.isCloudLoaded || !getSupabaseConfig().isConfigured;
+  }
+
+  public async initCloudSync(): Promise<void> {
+    const config = getSupabaseConfig();
+    if (!config.isConfigured) {
+      this.isCloudLoaded = true;
+      return;
+    }
+
+    try {
+      console.log('🔄 Đang đồng bộ dữ liệu từ Supabase Cloud...');
+      const res = await fetchStateFromSupabase();
+      if (res.success && res.hasData && res.data) {
+        this.state = res.data;
+        safeSetItem(STORAGE_KEY, JSON.stringify(this.state));
+        this.isCloudLoaded = true;
+        this.notify();
+        console.log('✅ Đã nạp thành công dữ liệu TKB từ Supabase Cloud');
+      } else if (res.success && !res.hasData) {
+        // Chưa có dữ liệu trên Supabase -> tự động đẩy bản ghi hiện tại lên
+        await syncStateToSupabase(this.state);
+        this.isCloudLoaded = true;
+        console.log('⚡ Đã khởi tạo dữ liệu ban đầu lên Supabase Cloud');
+      } else {
+        this.isCloudLoaded = true;
+      }
+    } catch (e) {
+      this.isCloudLoaded = true;
+      console.warn('Supabase auto-initialization error:', e);
+    }
   }
 
   private loadFromStorage(): DatabaseState {
