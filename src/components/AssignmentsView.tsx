@@ -1879,10 +1879,10 @@ export const AssignmentsView: React.FC = () => {
                   <label className="block text-slate-400 font-medium mb-1">Max Tiết/Tuần</label>
                   <input
                     type="number"
-                    min="1"
-                    max="40"
+                    min="0"
                     value={editTeacherData.maxPeriodsPerWeek}
-                    onChange={(e) => setEditTeacherData({ ...editTeacherData, maxPeriodsPerWeek: parseInt(e.target.value) || 25 })}
+                    onChange={(e) => setEditTeacherData({ ...editTeacherData, maxPeriodsPerWeek: parseInt(e.target.value) || 0 })}
+                    placeholder="VD: 39"
                     className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-white font-mono focus:outline-none focus:border-indigo-500"
                   />
                 </div>
@@ -1891,7 +1891,6 @@ export const AssignmentsView: React.FC = () => {
                   <input
                     type="number"
                     min="1"
-                    max="10"
                     value={editTeacherData.maxPeriodsPerDay}
                     onChange={(e) => setEditTeacherData({ ...editTeacherData, maxPeriodsPerDay: parseInt(e.target.value) || 5 })}
                     className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-white font-mono focus:outline-none focus:border-indigo-500"
